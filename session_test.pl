@@ -1,4 +1,4 @@
-package Kenterblogger;
+package Apache::MiniBlog;
 use strict;
 use warnings;
 
@@ -28,8 +28,9 @@ if ($method eq 'GET'){
 # check for query string ?Login or something... 
 # so, we can get the session ID and the damn query string.
 
-if ($args->{q}){
-    my ($session_id, $action) = split /\s+/, $args->{q};
+if (my $session_id = $args->{session_id}){ # we were logged in, real action
+#    my ($session_id, $action) = split /\s+/, $args->{q};
+	my $action = $args->{action};
     # here we can 'dispatch' to some function
     if ($action eq 'Logout'){ 
         my %session; 
@@ -42,25 +43,39 @@ if ($args->{q}){
 <meta http-equiv="refresh" content="5; url=$myurl">
 </head><body>
 <h2>Logged Out!</h2>
-<p>$args->{q}</p>
+<p>what we read: $args->{q}</p>
 <p>Session: $session_id<br>Action: $action</p>
 </body>
 EOF
     }
 }
-else {
-    my $reply = <<"EOF";
+elsif (defined $args->{action} ){ # from the wild, possibly
+	
+	if ($args->{action} eq 'Login') {
+    print <<"EOF";
 <html><head><title>LogIn</title></head><body>
-<h3>Login Here</h3>
-
+<h3>Login Here</h3> 
 <form action="http://localhost/cgi-perl/session_test.pl" method="post">
 Username: <input type="text" name="username">
 Password: <input type="password" name="password"> 
 <input type="submit" value="Login">
 </form></body></html> 
 EOF
-    print $reply;
-}# login/actions
+}
+} 
+else {
+	# the other 'meat' of the system. Display something to the "public"
+    print <<"EOF";
+<html><head>
+<title>Apache::MiniBlog The Lightweight, fast Weblog</title>
+</head><body>
+<p>
+This will be something, soon.
+</p>
+<a href="${myurl}?action=Login">Login</a>
+</body></html> 
+EOF
+}
 } # GET
 
 elsif ($method eq 'POST') { 
