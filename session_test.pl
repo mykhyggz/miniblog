@@ -19,18 +19,40 @@ my $args = $cgi->Vars;
 my $myurl='http://localhost/cgi-perl/session_test.pl';
 my $realpath = '/var/www/localhost/perl/storage';
 
-$r->content_type( 'text/html');
+$r->content_type('text/html');
 
 my $method = $r->method(); 
 
 if ($method eq 'GET'){
 
 # check for query string ?Login or something... 
-my $query = join '', keys %$args;
+# so, we can get the session ID and the damn query string.
+
+if ($args->{q}){
+    my ($session_id, $action) = split /\s+/, $args->{q};
+    # here we can 'dispatch' to some function
+    if ($action eq 'Logout'){ 
+        my %session; 
+        tie %session, 'Apache::Session::SQLite', $session_id, 
+     { DataSource => "dbi:SQLite:/var/www/localhost/perl/storage/sessions.db" }; 
+        $session{is_logged_in}=0; 
+        undef %session; 
+        print <<"EOF";
+<html><head><title>Logged Out</title>
+<meta http-equiv="refresh" content="5; url=$myurl">
+</head><body>
+<h2>Logged Out!</h2>
+<p>$args->{q}</p>
+<p>Session: $session_id<br>Action: $action</p>
+</body>
+EOF
+    }
+}
+else {
     my $reply = <<"EOF";
 <html><head><title>LogIn</title></head><body>
 <h3>Login Here</h3>
-<p>$query</p>
+
 <form action="http://localhost/cgi-perl/session_test.pl" method="post">
 Username: <input type="text" name="username">
 Password: <input type="password" name="password"> 
@@ -38,6 +60,7 @@ Password: <input type="password" name="password">
 </form></body></html> 
 EOF
     print $reply;
+}# login/actions
 } # GET
 
 elsif ($method eq 'POST') { 
@@ -80,6 +103,7 @@ EOF
 <p>this should be config options, if no config, I guess,
 or a full admin page</p>
 <h4>remember to log out!</h4>
+<a href="${myurl}?q=${session_id}+Logout">logout</a>
 <form action="http://localhost/cgi-perl/session_test.pl" method="post"> 
 <input type="hidden" name="session_id" value="$session_id">
 <input type="hidden" name="action" value="Logout">
