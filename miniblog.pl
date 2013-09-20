@@ -15,11 +15,33 @@ my $r = shift;
 my $cgi = CGI->new( $r );
 my $args = $cgi->Vars;
 
+our $nav_header = "Items";
+our $sidebar_header = "Actions";
 our $myurl='http://localhost/cgi-perl/miniblog.pl';
 our $storage_path = '/var/www/localhost/perl/storage';
 
 $r->content_type('text/html');
-our $header = "<html><head><title>Apache::MiniBlog The Lightweight, fast Weblog </title></head><body>";
+our $header = <<"EOF";
+<html><head><title>Apache::MiniBlog The Lightweight, fast Weblog </title>
+<link href="http://localhost/css/miniblog_layout.css" rel="stylesheet" type="text/css" />
+</head><body><div class="page-wrap"><section class="main-content">
+EOF
+
+our $footer = <<"EOF"; 
+</section><nav class="main-nav">
+    <h2>$nav_header</h2>
+    <ul>
+      <li><a href="#">Home</a></li>
+      <li><a href="#">About</a></li>
+      <li><a href="#">Clients</a></li>
+      <li><a href="#">Contact Us</a></li>
+    </ul>
+  </nav> 
+  <aside class="main-sidebar">
+    <h2>$sidebar_header</h2>
+    <p>I am a rather effortless column of equal height.</p>
+  </aside></div></body></html>
+EOF
 
 our $error = <<"EOF";
 <html><head> <meta http-equiv="refresh" content="5; url=$myurl"></head><body>
@@ -67,8 +89,8 @@ $header
 <form action="$myurl" method="post">
 Username: <input type="text" name="username">
 Password: <input type="password" name="password"> 
-<input type="submit" value="Login">
-</form></body></html> 
+<input type="submit" value="Login"></form>
+$footer
 EOF
         } # action:Login
         # if action = request login with comment privs and a comment
@@ -84,7 +106,7 @@ $header
 <li>this</li>
 <li>that</li>
 </ul>
-</body></html> 
+$footer
 EOF
     } # display the root of the site
 } # GET
@@ -101,7 +123,7 @@ elsif ($method eq 'POST') {
      { DataSource => "dbi:SQLite:$storage_path/sessions.db" }; 
 
 # the extent of our security, so don't forget to log *out*! ;-)
-        if ($session{is_logged_in}){ 
+        if ($session{is_logged_in}){
 
 # the meat of it, "is logged in", now, what can user/admin do?
 # get user data from DBI here... 
@@ -112,26 +134,43 @@ elsif ($method eq 'POST') {
 
             $sth->execute($session_id);
             my $user_data = $sth->fetchrow_hashref(); 
-            $session_id = $session{_session_id};
-            my $ua = $r->headers_in->{'User-Agent'}; 
+#            $session_id = $session{_session_id}; # check against found id?
+#            my $ua = $r->headers_in->{'User-Agent'};  #also not needed
             print <<"EOF";
 $header
 <h4>remember to log out!</h4>
 <a href="${myurl}?session_id=${session_id}&action=Logout">logout</a>
 <p>this should be config options, if no config, I guess,
-or a full admin page</p>
+or a full admin page, though here are some ideas. </p>
+
+<p>Maybe the recent articles in the middle, actions on the right, where stats would be for a viewer, with navigation (drafts, vs published, etc. ) and meta-actions on the left.</p>
+<form action="$myurl" method="post"> 
+<input type="hidden" name="session_id" value="$session_id">
+<input type="hidden" name="action" value="New">
+<input type="submit" value="New"></form>
+<form action="$myurl" method="post"> 
+<input type="hidden" name="session_id" value="$session_id">
+<input type="hidden" name="action" value="Edit">
+<input type="submit" value="Edit"></form>
+<form action="$myurl" method="post"> 
+<input type="hidden" name="session_id" value="$session_id">
+<input type="hidden" name="action" value="Manage">
+<input type="submit" value="Manage"></form>
 <form action="$myurl" method="post"> 
 <input type="hidden" name="session_id" value="$session_id">
 <input type="hidden" name="action" value="publish">
-<input type="submit" value="Publish">
-</form></body></html> 
+<input type="submit" value="Publish"></form>
+$footer
 EOF
-
+# now close our user DB handle opened
+        $dbh->disconnect();
         } # is_logged_in
-        else{ 
+        else { 
+# WTF, session open, post request, but not logged in? 
             print $error;
-            # WTF, session open, post request, but not logged in? 
         }
+# close our session opened at has session id bit
+    undef %session;
     } # has session_id
     else { 
 # do login, no session yet
@@ -150,8 +189,8 @@ $header
 <form action="$myurl" method="post"> 
 <input type="hidden" name="session_id" value="$session_id">
 <input type="hidden" name="action" value="AddUsers">
-<input type="submit" value="Add Users">
-</form></body></html> 
+<input type="submit" value="Add Users"></form>
+$footer
 EOF
                 }
             else {
@@ -164,11 +203,13 @@ $header
 <form action="$myurl" method="post"> 
 <input type="hidden" name="session_id" value="$session_id">
 <input type="hidden" name="action" value="">
-<input type="submit" value="go to site">
-</form></body></html> 
+<input type="submit" value="go to site"></form>
+$footer
 EOF
                 }
-            } # password_ok, landing pages
+# close the session we opened at successful login
+            undef $session;
+            } # password_ok, new session and landing pages
             else {
             print $error;
             }
@@ -188,7 +229,7 @@ sub check_password {
         my $session_id = ( $user_data->{last_session_id} || undef );
 
         if (! $hash_returned){ 
-
+            $dbh->disconnect; # we don't come back
 # user has no password stored, get one in there 
             if ($pass_given){
 
@@ -215,8 +256,8 @@ $header
 <form action="$myurl" method="post">
 Password: <input type="password" name="password" method="post"> 
 <input type="hidden" name="username" value="$user_id">
-<input type="submit" value="Set Password">
-</form></body></html> 
+<input type="submit" value="Set Password"></form>
+$footer
 EOF
             } # pass not given, or pass given and hash stored
         } # user name, but no hash 
@@ -243,13 +284,16 @@ EOF
 # put in the user record
                 my $sth=$dbh->prepare("update users set last_session_id = ? where (id=?)");
                 $sth->execute($session_id, $user_id); 
-# return a reference to this session
+# return a reference to this session and the user data
+               
                 return ($user_data,\%session);
             } # password matched
             else {
+                $dbh->disconnect;
                 return 0
             } # password failed
-        } # has passhash to match in DB
+        } # has passhash to match in DB 
+    $dbh->disconnect(); # just in case, though it should just go out of scope
     } # we got a user name
 }
 
