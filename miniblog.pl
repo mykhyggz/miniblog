@@ -6,25 +6,25 @@ no warnings 'redefine';
 use DBI;
 use CGI qw/:cgi/;
 use Apache::Session::SQLite; 
-# use Apache2::Const qw(:common);
 use Digest::SHA qw/sha256_hex/;
 use YAML qw/LoadFile DumpFile Load Dump/;
+use Data::UUID;
 
-# use 5.12.0;
 my $debug = 1;
 my $r = shift;
 my $cgi = CGI->new( $r );
 my $args = $cgi->Vars;
 
 our $default_actions = {Admin=>['Logout'], User=>['Logout'] };
-our $default_functions = {Admin=>['AddUsers', 'Edit'], User=>['BugAdmin'] };
+our $default_functions = {Admin=>['Add', 'Edit'], User=>['Comment'] };
 
 our $announce_yaml = "announce.yml";
+
 # Actions: Single things like login/out, preview, publish, etc. GET links
 # Login Logout
 our $actions_header = "Actions";
+
 # Functions: things that may have actions associated, like new, edit, etc. POST 
-# Add Edit AddUser Comment
 our $functions_header = "Functions";
 
 # so this changes per rendering
@@ -35,8 +35,6 @@ our $storage_path = '/var/www/localhost/perl/storage';
 our $yaml_path = '/var/www/localhost/htdocs/blogfiles';
 our $session_id = '';
 
-$r->content_type('text/html');
-
 our $header = <<"EOF";
 <html><head><title>Apache::MiniBlog The Lightweight, fast Weblog </title>
 <link href="http://localhost/css/miniblog_layout.css" rel="stylesheet" type="text/css" />
@@ -44,11 +42,12 @@ our $header = <<"EOF";
 EOF
 
 our $error = <<"EOF";
-<html><head> <meta http-equiv="refresh" content="5; url=$myurl"></head><body>
+<html><head> <meta http-equiv="refresh" content="2; url=$myurl"></head><body>
 <h2>Whoops!</h2> 
 <p>Hmm... there should have been something... but here comes the homepage ;-/</p>
 </body></html>
 EOF
+$r->content_type('text/html');
 
 my $method = $r->method(); 
 
@@ -64,12 +63,13 @@ if ($method eq 'GET'){
             tie %session, 'Apache::Session::SQLite', $session_id, 
                     { DataSource => "dbi:SQLite:$storage_path/sessions.db" }; 
 
-        if ($session{is_logged_in}){
+            if ($session{is_logged_in}){
+
 # check for action
 # here we can cascade a 'dispatch' to some function
-            if ($action eq 'Logout'){
-                $session{is_logged_in}=0; 
-                print <<"EOF";
+                if ($action eq 'Logout'){
+                    $session{is_logged_in}=0; 
+                    print <<"EOF";
 <html><head> <meta http-equiv="refresh" content="5; url=$myurl"></head><body>
 <h2>Logged Out!</h2> 
 <!--p>Session: $session_id<br>Action: $action</p-->
@@ -77,38 +77,44 @@ if ($method eq 'GET'){
 </body></html>
 EOF
             
-            } # action:Logout
-else {
+                } # action:Logout
+                else {
 
 # get user data 
-            my $dbh = DBI->connect("dbi:SQLite:$storage_path/users.db","","",
+                    my $dbh = DBI->
+                        connect("dbi:SQLite:$storage_path/users.db","","",
 { sqlite_use_immediate_transaction => 1, RaiseError => 1, AutoCommit => 1  });
-            my $sth=$dbh->prepare("select * from users where last_session_id=?");
+                    my $sth=$dbh->
+                        prepare("select * from users where last_session_id=?");
 
-            $sth->execute($session_id);
-            my $user_data = $sth->fetchrow_hashref(); 
+                    $sth->execute($session_id);
+                    my $user_data = $sth->fetchrow_hashref(); 
+
 # probably logged in, must want to see *something*
-            if ($action eq 'Default'){
-                $footer = make_footer(undef, undef, $session_id, $user_data->{role});
-                my $to_view = LoadFile("$yaml_path/$session{last_yaml}");
-            print <<"EOF";
-$header <h2>$to_view->{title}</h2>
-<h3>$to_view->{description}</h3>
-<h4>$to_view->{author}</h4>
-$to_view->{copy}
+                    if ($action eq 'Default'){ 
+                        $footer =
+                    make_footer(undef, undef, $session_id, $user_data->{role});
+
+                        my $post =
+                        LoadFile("$yaml_path/$session{last_yaml}");
+                        print <<"EOF";
+$header
+<h2>$post->{title}</h2>
+<h3>$post->{description}</h3>
+<h4>$post->{author}</h4>
+$post->{copy}
 $footer
 EOF
 
-            } # action:Default
-    } # not logout, opened user data
-}
+                    } # action:Default
+                } # not logout, opened user data
+            } # session is_logged_in
 
-
-
-            undef %session; # less likely SQLite locks?
+# drop mod_perl session object -- less likely SQLite locks?
+            undef %session;
         } # if session and action
         else { # empty action with session
-        print $error;
+            print $error;
         }
     } # if session
     elsif (my $action = $args->{action} ){ 
@@ -133,9 +139,15 @@ EOF
 # Display something to the "public": the root of the blog engine
     else {
         $footer = make_footer(['Login'], []);
+        opendir  D, $yaml_path or die $!;
+        my @yaml_files = map {LoadFile("$yaml_path/$_")} grep(! /^\.{1,2}$/, (readdir D));
+
+        my $entries = '';
+        $entries .= "<p>$_->{title}<br />$_->{author}<br />$_->{description}</p>$_->{copy}<hr />" for (@yaml_files);
+        
         print <<"EOF";
-$header
-<p> This will be something, soon.  </p> 
+$header 
+$entries 
 $footer
 EOF
     } # display the root of the site
@@ -166,7 +178,7 @@ elsif ($method eq 'POST') {
             my $user_data = $sth->fetchrow_hashref(); 
             if ($user_data->{role} eq 'Admin'){
                 $footer = make_footer( ['Logout'],
-                ['New','Edit', 'AddUser'], $session_id );
+                ['Add','Edit', 'AddUser'], $session_id );
             }
             elsif ($user_data->{role} eq 'User'){
                 $footer = make_footer(['Logout'], ['Comment'], $session_id);
@@ -188,9 +200,23 @@ EOF
 # Action was posted in form from "Login Success Page"
 else {
 
-# the editor
+    if ($action eq 'Add'){ 
+        # my $page_to_edit = 'somefile.yml'; <input type="hidden" name="yamlfile" value="$page_to_edit"> 
+        print <<"EOF";
+$header
+<form action="$myurl" method="post">
+Title: <input type="text" name="Title" value=""><br />
+Description: <input type="text" name="Description" value=""><br /> 
+Author: <input type="text" name="Author" value="$user_data->{username}"><br /> 
+<textarea rows="20" cols="50" name="Copy">TypeYrShitHere</textarea>
+<input type="hidden" name="action" value="Publish">
+<input type="hidden" name="session_id" value="$session_id">
 
-    if ($action eq 'Edit'){ 
+<input type="submit" value="Publish"></form>
+$footer
+EOF
+    }
+    elsif ($action eq 'Edit'){ 
         my $page_to_edit = $session{last_yaml};
         my $post = LoadFile("$yaml_path/$page_to_edit");
         print <<"EOF";
@@ -212,19 +238,25 @@ $footer
 EOF
     }
     elsif ($action eq 'Publish'){ 
-my $title =  $args->{Title};
-my $description = $args->{Description};
-my $author = $args->{Author};
-my $copy = $args->{Copy};
-my $yaml_file = $args->{yamlfile};
+        my $title =  $args->{Title};
+        my $description = $args->{Description};
+        my $author = $args->{Author};
+        my $copy = $args->{Copy}; 
 
-my $post= {title =>$title, description =>$description,
-    author =>$author, copy =>$copy};
-
-DumpFile("$yaml_path/$yaml_file", $post) or die $!; 
-print <<"EOF"; 
-<html><head> <meta http-equiv="refresh" content="5; url=${myurl}?session_id=$session_id&action=Default"></head><body>
-<p>updated... redirecting somewhere</p>
+        my $post= {title =>$title, description =>$description,
+            author =>$author, copy =>$copy};
+        my $ug =  new Data::UUID;
+        my $yaml_file = $ug->to_string($ug->create()) . '_';
+        ( my $hrid = $args->{Title})=~s/[^a-zA-Z0-9]/_/g ;
+        $yaml_file .= $hrid;
+        $yaml_file .= '.yml';        
+# special cases for special posts
+        $yaml_file = $args->{yamlfile} if (defined  $args->{yamlfile});
+        DumpFile("$yaml_path/$yaml_file", $post) or die $!; 
+        $session{last_yaml}=$yaml_file;
+        print <<"EOF"; 
+<html><head> <meta http-equiv="refresh" content="2; url=${myurl}?session_id=$session_id&action=Default"></head><body>
+<p> Saved $yaml_file... redirecting</p>
 </body></html>
 EOF
 
@@ -236,8 +268,6 @@ EOF
 # WTF, session open, post request, but not logged in? 
             print $error;
         }
-# close our session opened at has session id bit
-    undef %session;
     } # has session_id
     else { 
 # do login, no session yet 
@@ -246,17 +276,23 @@ EOF
                 my $session_id = $session->{_session_id};
 # we passed! Go to Admin/User "landing page" with a session passed back.  
                 if ($user_data->{role} eq 'Admin'){
-                    $footer = make_footer(['Logout'],['Admin','Edit'], $session_id);
+                    $footer =
+                    make_footer(['Logout'],['Add','Edit','Users'], $session_id);
                 }
                 else {
-                    $footer = make_footer(['Logout'], ['User'], $session_id);
+                    $footer = make_footer(['Logout'], ['Add'], $session_id);
                 }
  
 my $announce= LoadFile("$yaml_path/$announce_yaml");
 $session->{last_yaml}=$announce_yaml;
 print <<"EOF";
 $header
-<p>Howdy, $user_data->{username}!</p> $announce->{copy} $footer
+<p>Howdy, $user_data->{username}!</p>
+<h2>$announce->{title}</h2>
+<h3>$announce->{description}</h3>
+<h4>$announce->{author}</h4>
+$announce->{copy}
+$footer
 EOF
                 
 # close the session we opened at successful login
