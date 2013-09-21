@@ -96,13 +96,10 @@ EOF
                     make_footer(undef, undef, $session_id, $user_data->{role});
 
                         my $post =
-                        LoadFile("$yaml_path/$session{last_yaml}");
+                        render_post(LoadFile("$yaml_path/$session{last_yaml}"));
                         print <<"EOF";
 $header
-<h2>$post->{title}</h2>
-<h3>$post->{description}</h3>
-<h4>$post->{author}</h4>
-$post->{copy}
+$post
 $footer
 EOF
 
@@ -143,7 +140,7 @@ EOF
         my @yaml_files = map {LoadFile("$yaml_path/$_")} grep(! /^\.{1,2}$/, (readdir D));
 
         my $entries = '';
-        $entries .= "<p>$_->{title}<br />$_->{author}<br />$_->{description}</p>$_->{copy}<hr />" for (@yaml_files);
+        $entries .= render_post($_) for (@yaml_files);
         
         print <<"EOF";
 $header 
@@ -197,7 +194,7 @@ $footer
 EOF
 }
 
-# Action was posted in form from "Login Success Page"
+# Action was posted in form
 else {
 
     if ($action eq 'Add'){ 
@@ -209,30 +206,33 @@ Title: <input type="text" name="Title" value=""><br />
 Description: <input type="text" name="Description" value=""><br /> 
 Author: <input type="text" name="Author" value="$user_data->{username}"><br /> 
 <textarea rows="20" cols="50" name="Copy">TypeYrShitHere</textarea>
+
 <input type="hidden" name="action" value="Publish">
 <input type="hidden" name="session_id" value="$session_id">
-
 <input type="submit" value="Publish"></form>
 $footer
 EOF
     }
     elsif ($action eq 'Edit'){ 
-        my $page_to_edit = $session{last_yaml};
-        my $post = LoadFile("$yaml_path/$page_to_edit");
+        my $yamlfile = $session{last_yaml};
+        my $post = LoadFile("$yaml_path/$yamlfile"); 
+
+# $actions_links, $functions_forms, $session_id, $role, $yamlfile
+        $footer = make_footer(['Logout'],[],$session_id,undef,$yamlfile);
+
         print <<"EOF";
 $header
-<form action="$myurl" method="post">
-Title: <input type="text" name="Title" value="$post->{title}"><br />
-Description: <input type="text" name="Description" value="$post->{description}"><br /> 
-Author: <input type="text" name="Author" value="$post->{author}"><br /> 
-<textarea rows="20" cols="50" name="Copy">
+
+<form action="$myurl" method="post"> 
+Title: <input type="text" name="Title" size=70 value="$post->{title}"><br />
+Description: <textarea name="Description" rows=2 cols=80>$post->{description}</textarea><br />
+Author: <input type="text" name="Author" size=60 value="$post->{author}"><br />
+<textarea rows="20" cols="80" name="Copy">
  $post->{copy}
-</textarea>
-<input type="hidden" name="yamlfile" value="$page_to_edit">
-<br />
+</textarea><br />
+<input type="hidden" name="yamlfile" value="$yamlfile">
 <input type="hidden" name="action" value="Publish">
 <input type="hidden" name="session_id" value="$session_id">
-
 <input type="submit" value="Publish"></form>
 $footer
 EOF
@@ -259,7 +259,6 @@ EOF
 <p> Saved $yaml_file... redirecting</p>
 </body></html>
 EOF
-
     }
      
 } # else we have an action, the action list
@@ -340,6 +339,7 @@ exit;
             }
 # user still needs to provide a password, prompt for one
             else { 
+
                 $footer = make_footer(['Home'], []);
                 print <<"EOF";
 $header
@@ -398,19 +398,27 @@ sub make_password {
 }
 
 sub make_footer {
-    my ( $actions_links, $functions_forms, $session_id, $role) = @_;
+    my ( $actions_links, $functions_forms, $session_id, $role,
+    $yamlfile) = @_;
+    $role = 'Guest' unless $role;
+    $yamlfile = '' unless $yamlfile;
     $session_id = '' unless $session_id;
-$actions_links = $default_actions->{$role} unless $actions_links;
-$functions_forms = $default_functions->{$role} unless $functions_forms;
+
+# pass just a role to get defaults... worth it? A Guest role set is needed.
+    $actions_links = $default_actions->{$role} unless $actions_links;
+    $functions_forms = $default_functions->{$role} unless $functions_forms;
 # a list of usable "actions_links"
-my $actions = '';
-$actions .= "<li><a href=\"${myurl}?session_id=${session_id}&action=$_\">$_</a></li>\n" 
-    for @$actions_links;
+    my $actions = '';
+    $actions .= "<li><a href=\"${myurl}?session_id=${session_id}&action=$_\">$_</a></li>\n" for @$actions_links;
 
 # a list of usable "functions_forms"
 my $functions = ''; 
 
-$functions .= "<form action=\"$myurl\" method=\"post\"><input type=\"hidden\" name=\"session_id\" value=\"$session_id\"><input type=\"hidden\" name=\"action\" value=\"$_\"><input type=\"submit\" value=\"$_\"></form>" for @$functions_forms;
+$functions .= "<form action=\"$myurl\" method=\"post\">
+<input type=\"hidden\" name=\"session_id\" value=\"$session_id\">
+<input type=\"hidden\" name=\"action\" value=\"$_\">
+<input type=\"hidden\" name=\"yamlfile\" value=\"$yamlfile\"> 
+<input type=\"submit\" value=\"$_\"></form>" for @$functions_forms;
 
 $footer = <<"EOF"; 
 </section><nav class="main-nav">
@@ -427,4 +435,14 @@ EOF
 return $footer;
 }
 
+sub render_post {
+my $post = shift;
+return <<"EOF";
+<h2>$post->{title}</h2>
+<h3>$post->{description}</h3>
+<h4>$post->{author}</h4>
+$post->{copy}
+<hr />
+EOF
+}
 # vim: paste:ai:ts=4:sw=4:sts=4:expandtab:ft=perl
