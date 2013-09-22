@@ -10,11 +10,12 @@ use Digest::SHA qw/sha256_hex/;
 use YAML qw/LoadFile DumpFile Load Dump/;
 use Data::UUID;
 
-my $debug = 0;
+
 my $r = shift;
 my $cgi = CGI->new( $r );
 my $args = $cgi->Vars;
-
+my $debug = 1;
+our $limit = 3;
 our $default_actions = {Admin=>['Logout','Articles'], User=>['Logout'] };
 our $default_functions = {Admin=>['Add', 'Edit'], User=>['Comment'] };
 
@@ -91,18 +92,19 @@ my $method = $r->method();
 if ($method eq 'GET'){
     if (my $session_id = $args->{session_id}){ 
 
-# we were probably logged in, real action, or breakage 
-        if ( my $action = $args->{action} ){
-# print "Aacti: $action $session_id" if $debug;
 # grab session from the session asked for
-            my %session; 
-            tie %session, 'Apache::Session::SQLite', $session_id, 
-                    { DataSource => "dbi:SQLite:$storage_path/sessions.db" }; 
+        my %session; 
+        tie %session, 'Apache::Session::SQLite', $session_id, 
+                { DataSource => "dbi:SQLite:$storage_path/sessions.db" }; 
 
-            if ($session{is_logged_in}){
+# we were probably logged in, real action, or breakage 
+            
+
+        if ($session{is_logged_in}){
 
 # check for action
 # here we can cascade a 'dispatch' to some function
+            if ( my $action = $args->{action} ){
                 if ($action eq 'Logout'){
                     $session{is_logged_in}=0; 
                     print <<"EOF";
@@ -145,8 +147,9 @@ EOF
 
                         opendir  D, $yaml_path or die $!;
 
+                    my $offset = $session{offset} || 0;
                     my @yaml_files = map {[$_,LoadFile("$yaml_path/$_")]}
-                        grep(! /^\.{1,2}$/, (readdir D));
+                        (grep(! /^\.{1,2}$/, sort (readdir D)))[$offset .. ($offset + $limit)];
 
                     my $entries = '';
                     $entries .= render_post($_, $session_id,1) for (@yaml_files);
@@ -181,14 +184,21 @@ EOF
                         
                     } # action:Pick
                 } # not logout, opened user data
-            } # session is_logged_in
+            }# if logged in and action # session is_logged_in
 
 # drop mod_perl session object -- less likely SQLite locks?
-            undef %session;
-        } # if session and action
+        
+        } #if logged in 
         else { # empty action with session
-            print $error;
+
+# pagination track?
+# so, most folks will wind up here, session, not logged in, no action 
+
+public_reader($session_id); 
+
         }
+
+    undef %session;
     } # if session
     elsif (my $action = $args->{action} ){ 
 
@@ -206,22 +216,10 @@ $footer
 EOF
         } # action:Login 
     }
-# Display something to the "public": the root of the blog engine
-    else {
-        $footer = make_footer(['Login'], []);
-        opendir  D, $yaml_path or die $!;
-        # make a 
-        my @yaml_files = map {[$_,LoadFile("$yaml_path/$_")]} grep(! /^\.{1,2}$/, (readdir D));
-
-        my $entries = '';
-        $entries .= render_post($_, undef,0) for (@yaml_files);
-        
-        print <<"EOF";
-$header 
-$entries 
-$footer
-EOF
-    } # display the root of the site
+# Display something to the "public": the root of the blog engine, initial page
+# initial session id for pagination
+     else {public_reader();}
+     # display the root of the site
 } # GET
 
 elsif ($method eq 'POST') {
@@ -519,16 +517,100 @@ sub render_post {
     $copy = '<p>' .  $copy  . '</p>';
     my $drill_link ='';
     $drill_link= "<a href=\"${myurl}?action=Pick&amp;file=$yaml&amp;session_id=$session_id\">Pick</a>" if ($session_id && $link_wanted); 
-return <<"EOF";
+    return <<"EOF";
 <article>  
 <h1>$post->{title}</h1>
 <h5>$post->{description}</h5>
 <h4>$post->{author}</h4>
 $copy
 $drill_link
-<hr />
-
-</article>
+<hr /> </article>
 EOF
 }
+
+sub public_reader {
+    my $session_id = shift;
+# maybe this should come in the @_
+    $footer = make_footer(['SuckinJunk','ButtSniff','Douchebag','Login'], []);
+
+    my %session; 
+    tie %session, 'Apache::Session::SQLite', ($session_id || undef),
+ { DataSource => "dbi:SQLite:$storage_path/sessions.db" }; 
+
+    $session_id = $session{_session_id};
+
+my @yaml_files ;
+
+    if (! $session{dirlist}){ 
+        opendir  D, $yaml_path or die $!; 
+        @yaml_files = grep(! /^\.{1,2}$/, sort (readdir D));
+        $session{dirlist} = [@yaml_files];
+    }
+    else {
+        @yaml_files = @{$session{dirlist}};
+    }
+
+    my $offset = ( (defined $session{offset}) ? $session{offset} : 0); 
+
+    my $target = $offset + $limit ;
+    my $files_count = $#yaml_files + 1;
+
+    my $more_needed = "<a href=\"$myurl?session_id=$session_id\">more</a>";
+    if ($target > $files_count){
+        $target = $files_count;
+        $offset = $files_count - $limit;
+    $more_needed = "<h6>hey… that’s all folks!</h6>";
+    }
+
+
+#  update the offset in the session
+
+     $session{offset}=$target + 1;   
+
+   my @posts = map {[$_,LoadFile("$yaml_path/$_")]} grep(! undef, @yaml_files[$offset .. ($target - 1)]);
+
+
+    my $entries = '';
+    $entries .= render_post($_, undef,0, $session_id) for (@posts);
+
+
+
+
+    print <<"EOF";
+$header 
+$entries 
+$more_needed
+$footer
+
+EOF
+
+}
+
+
+sub keepme {
+#  
+#         $footer = make_footer(['SuckinJunk','ButtSniff','Douchebag','Login'], []);
+#         opendir  D, $yaml_path or die $!; 
+#         my $session_id = $args->{session_id} || undef;
+#         my %session; 
+#         tie %session, 'Apache::Session::SQLite', $session_id ,
+#      { DataSource => "dbi:SQLite:$storage_path/sessions.db" }; 
+#         $session_id = $session{_session_id};
+#         my $offset = 0;
+#         my $target = $offset + $limit;
+#         my @yaml_files = map {[$_,LoadFile("$yaml_path/$_")]} (grep(! /^\.{1,2}$/, sort (readdir D)))[$offset .. $target];
+# #  update the offset in the session
+#         $session{offset}=$target + 1;
+# 
+#         my $entries = '';
+#         $entries .= render_post($_, undef,0, $session_id) for (@yaml_files);
+#         
+#         print <<"EOF";
+# $header 
+# $entries 
+# $footer
+# <a href="$myurl?session_id=$session_id">more</a>
+# EOF
+    }
+
 # vim: paste:ai:ts=4:sw=4:sts=4:expandtab:ft=perl
