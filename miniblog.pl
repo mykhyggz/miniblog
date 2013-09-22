@@ -10,12 +10,12 @@ use Digest::SHA qw/sha256_hex/;
 use YAML qw/LoadFile DumpFile Load Dump/;
 use Data::UUID;
 
-my $debug = 1;
+my $debug = 0;
 my $r = shift;
 my $cgi = CGI->new( $r );
 my $args = $cgi->Vars;
 
-our $default_actions = {Admin=>['Logout'], User=>['Logout'] };
+our $default_actions = {Admin=>['Logout','Articles'], User=>['Logout'] };
 our $default_functions = {Admin=>['Add', 'Edit'], User=>['Comment'] };
 
 our $announce_yaml = "announce.yml";
@@ -36,8 +36,44 @@ our $yaml_path = '/var/www/localhost/htdocs/blogfiles';
 our $session_id = '';
 
 our $header = <<"EOF";
+<!DOCTYPE html>
 <html><head><title>Apache::MiniBlog The Lightweight, fast Weblog </title>
-<link href="http://localhost/css/miniblog_layout.css" rel="stylesheet" type="text/css" />
+<link href="http://localhost/css/miniblog_layout.css" rel="stylesheet" type="text/css"><meta charset="UTF-8">
+<style type="text/css">
+
+h1 {
+  font: bold 2em Sans-Serif;
+  margin: 1em 0 .15em 0;
+}
+h2 { 
+  font: bold 1.5em Sans-Serif;
+  margin: 0 0 .15em 0; 
+}
+p {
+  margin: 2em 0 1em 7em;
+}
+
+hr {
+  color rgb(200,200,200); 
+  width: 50%; margin-top: 2em; margin-bottom: 3em;
+} 
+
+article h2, article h3, article, h4 {
+ font-family: Helvetica,Arial,sans-serif;
+ color: rgb(120, 120, 120);
+ margin: 0 0 0 0
+}
+
+article h1, article h2 { 
+ color: rgb(200, 200, 200);
+} 
+
+article p {
+ color: rgb(50, 50, 50);
+ font-family: Bookman,Times,serif; 
+ font-size: 10pt;
+}
+</style>
 </head><body><div class="page-wrap"><section class="main-content">
 EOF
 
@@ -89,21 +125,61 @@ EOF
 
                     $sth->execute($session_id);
                     my $user_data = $sth->fetchrow_hashref(); 
-
+print "Action = ", $action if $debug;
 # probably logged in, must want to see *something*
                     if ($action eq 'Default'){ 
                         $footer =
                     make_footer(undef, undef, $session_id, $user_data->{role});
 
                         my $post =
-                        render_post(LoadFile("$yaml_path/$session{last_yaml}"));
+                        render_post([$session{last_yaml},LoadFile("$yaml_path/$session{last_yaml}")],$session_id);
                         print <<"EOF";
 $header
 $post
 $footer
 EOF
+                    } # action:Default   
+                    elsif ($action eq 'Articles'){
+                        $footer = make_footer
+                            (undef, undef, $session_id, $user_data->{role});
 
-                    } # action:Default
+                        opendir  D, $yaml_path or die $!;
+
+                    my @yaml_files = map {[$_,LoadFile("$yaml_path/$_")]}
+                        grep(! /^\.{1,2}$/, (readdir D));
+
+                    my $entries = '';
+                    $entries .= render_post($_, $session_id,1) for (@yaml_files);
+                    
+                    print <<"EOF";
+$header 
+$entries 
+$footer
+EOF
+                        
+                    } # action:Articles
+
+                    elsif ($action eq 'Pick'){ 
+                        my $yaml = $args->{file};
+                        if ($user_data->{role} eq 'Admin'){
+                            $footer = make_footer
+                            (['Logout'], ['Edit'], $session_id, $user_data->{role},$yaml);
+                        }
+                        else { 
+                            $footer = make_footer
+                            (['Logout'], ['Comment'], $session_id, $user_data->{role},$yaml);
+                        }
+
+                        my $post = render_post
+                          ([$yaml,LoadFile("$yaml_path/$yaml")], $session_id,0);
+
+                        print <<"EOF";
+$header 
+$post
+$footer
+EOF
+                        
+                    } # action:Pick
                 } # not logout, opened user data
             } # session is_logged_in
 
@@ -128,19 +204,17 @@ Password: <input type="password" name="password">
 <input type="submit" value="Login"></form>
 $footer
 EOF
-        } # action:Login
-        # if action = request login with comment privs and a comment
-        # if action = contact, ...?
+        } # action:Login 
     }
-
 # Display something to the "public": the root of the blog engine
     else {
         $footer = make_footer(['Login'], []);
         opendir  D, $yaml_path or die $!;
-        my @yaml_files = map {LoadFile("$yaml_path/$_")} grep(! /^\.{1,2}$/, (readdir D));
+        # make a 
+        my @yaml_files = map {[$_,LoadFile("$yaml_path/$_")]} grep(! /^\.{1,2}$/, (readdir D));
 
         my $entries = '';
-        $entries .= render_post($_) for (@yaml_files);
+        $entries .= render_post($_, undef,0) for (@yaml_files);
         
         print <<"EOF";
 $header 
@@ -197,6 +271,7 @@ EOF
 # Action was posted in form
 else {
 
+#ADD
     if ($action eq 'Add'){ 
         # my $page_to_edit = 'somefile.yml'; <input type="hidden" name="yamlfile" value="$page_to_edit"> 
         print <<"EOF";
@@ -213,8 +288,9 @@ Author: <input type="text" name="Author" value="$user_data->{username}"><br />
 $footer
 EOF
     }
+#EDIT
     elsif ($action eq 'Edit'){ 
-        my $yamlfile = $session{last_yaml};
+        my $yamlfile = ( $args->{'yamlfile'} or $session{last_yaml});
         my $post = LoadFile("$yaml_path/$yamlfile"); 
 
 # $actions_links, $functions_forms, $session_id, $role, $yamlfile
@@ -237,12 +313,12 @@ Author: <input type="text" name="Author" size=60 value="$post->{author}"><br />
 $footer
 EOF
     }
+# PUBLISH
     elsif ($action eq 'Publish'){ 
         my $title =  $args->{Title};
         my $description = $args->{Description};
         my $author = $args->{Author};
-        my $copy = $args->{Copy}; 
-
+        my $copy = $args->{Copy};
         my $post= {title =>$title, description =>$description,
             author =>$author, copy =>$copy};
         my $ug =  new Data::UUID;
@@ -255,7 +331,7 @@ EOF
         DumpFile("$yaml_path/$yaml_file", $post) or die $!; 
         $session{last_yaml}=$yaml_file;
         print <<"EOF"; 
-<html><head> <meta http-equiv="refresh" content="2; url=${myurl}?session_id=$session_id&action=Default"></head><body>
+<html><head> <meta http-equiv="refresh" content="2; url=${myurl}?session_id=$session_id&amp;action=Default"></head><body>
 <p> Saved $yaml_file... redirecting</p>
 </body></html>
 EOF
@@ -276,7 +352,7 @@ EOF
 # we passed! Go to Admin/User "landing page" with a session passed back.  
                 if ($user_data->{role} eq 'Admin'){
                     $footer =
-                    make_footer(['Logout'],['Add','Edit','Users'], $session_id);
+                    make_footer(['Logout','Articles'],['Add','Edit','Users'], $session_id);
                 }
                 else {
                     $footer = make_footer(['Logout'], ['Add'], $session_id);
@@ -409,7 +485,7 @@ sub make_footer {
     $functions_forms = $default_functions->{$role} unless $functions_forms;
 # a list of usable "actions_links"
     my $actions = '';
-    $actions .= "<li><a href=\"${myurl}?session_id=${session_id}&action=$_\">$_</a></li>\n" for @$actions_links;
+    $actions .= "<li><a href=\"${myurl}?session_id=${session_id}&amp;action=$_\">$_</a></li>\n" for @$actions_links;
 
 # a list of usable "functions_forms"
 my $functions = ''; 
@@ -422,13 +498,13 @@ $functions .= "<form action=\"$myurl\" method=\"post\">
 
 $footer = <<"EOF"; 
 </section><nav class="main-nav">
-    <h2>$actions_header</h2>
+    <h3>$actions_header</h3>
     <ul>
 $actions
     </ul>
   </nav> 
   <aside class="main-sidebar">
-    <h2>$functions_header</h2>
+    <h3>$functions_header</h3>
 $functions
   </aside></div></body></html>
 EOF
@@ -436,13 +512,23 @@ return $footer;
 }
 
 sub render_post {
-my $post = shift;
+    my ( $yamlfile, $session_id, $link_wanted ) = @_;
+    my $yaml = $yamlfile->[0];
+    my $post = $yamlfile->[1];
+    my $copy = join "</p>\n<p>", (split /[\r\n]+/, $post->{copy});
+    $copy = '<p>' .  $copy  . '</p>';
+    my $drill_link ='';
+    $drill_link= "<a href=\"${myurl}?action=Pick&amp;file=$yaml&amp;session_id=$session_id\">Pick</a>" if ($session_id && $link_wanted); 
 return <<"EOF";
-<h2>$post->{title}</h2>
-<h3>$post->{description}</h3>
+<article>  
+<h1>$post->{title}</h1>
+<h5>$post->{description}</h5>
 <h4>$post->{author}</h4>
-$post->{copy}
+$copy
+$drill_link
 <hr />
+
+</article>
 EOF
 }
 # vim: paste:ai:ts=4:sw=4:sts=4:expandtab:ft=perl

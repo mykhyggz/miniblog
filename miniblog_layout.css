@@ -72,7 +72,7 @@ html, body {
 }
 
 body {
-  padding: 2em;
+  padding: 1em;
   background: #79a693;
 //  background-image: url("/css/background.jpg");
   background-position: 50% 50%;
@@ -86,13 +86,3 @@ body {
   box-sizing: border-box;
 }
 
-h1, h2 {
-  font: bold 2em Sans-Serif;
-  margin: 0 0 1em 0;
-}
-h2 {
-  font-size: 1.5em;
-}
-p {
-  margin: 0 0 1em 0;
-}
