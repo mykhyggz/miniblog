@@ -313,12 +313,14 @@ EOF
     }
 # PUBLISH
     elsif ($action eq 'Publish'){ 
+my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = gmtime; 
+        my $datetime = $mon + 1 . "/$mday/" . $year+1900 . " $hour:$min GMT" ;
         my $title =  $args->{Title};
         my $description = $args->{Description};
         my $author = $args->{Author};
         my $copy = $args->{Copy};
         my $post= {title =>$title, description =>$description,
-            author =>$author, copy =>$copy};
+            author =>$author, copy =>$copy, datetime=>$datetime};
         my $ug =  new Data::UUID;
         my $yaml_file = $ug->to_string($ug->create()) . '_';
         ( my $hrid = $args->{Title})=~s/[^a-zA-Z0-9]/_/g ;
@@ -522,6 +524,7 @@ sub render_post {
 <h1>$post->{title}</h1>
 <h5>$post->{description}</h5>
 <h4>$post->{author}</h4>
+<h6>$post->{datetime}</h6>
 $copy
 $drill_link
 <hr /> </article>
@@ -539,7 +542,7 @@ sub public_reader {
 
     $session_id = $session{_session_id};
 
-my @yaml_files ;
+    my @yaml_files ;
 
     if (! $session{dirlist}){ 
         opendir  D, $yaml_path or die $!; 
@@ -567,14 +570,11 @@ my @yaml_files ;
 
      $session{offset}=$target + 1;   
 
-   my @posts = map {[$_,LoadFile("$yaml_path/$_")]} grep(! undef, @yaml_files[$offset .. ($target - 1)]);
+   my @posts = map {[$_,LoadFile("$yaml_path/$_")]} @yaml_files[$offset .. ($target - 1)];
 
 
     my $entries = '';
     $entries .= render_post($_, undef,0, $session_id) for (@posts);
-
-
-
 
     print <<"EOF";
 $header 
