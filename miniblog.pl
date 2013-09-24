@@ -14,9 +14,9 @@ use Data::UUID;
 my $r = shift;
 my $cgi = CGI->new( $r );
 my $args = $cgi->Vars;
-my $debug = 1;
+our $debug = 1;
 our $limit = 3;
-our $default_actions = {Admin=>['Logout','Articles'], User=>['Logout'] };
+our $default_actions = {Admin=>['Logout','Articles'], User=>['Logout'], 'Guest'=>['Login'] };
 our $default_functions = {Admin=>['Add', 'Edit'], User=>['Comment'] };
 
 our $announce_yaml = "announce.yml";
@@ -28,10 +28,9 @@ our $actions_header = "Actions";
 # Functions: things that may have actions associated, like new, edit, etc. POST 
 our $functions_header = "Functions";
 
-# so this changes per rendering
-our $footer = undef;
+our $footer = '';
 
-our $myurl='http://localhost/cgi-perl/miniblog.pl';
+our $myurl='/cgi-perl/miniblog.pl';
 our $storage_path = '/var/www/localhost/perl/storage';
 our $yaml_path = '/var/www/localhost/htdocs/blogfiles';
 our $session_id = '';
@@ -39,7 +38,7 @@ our $session_id = '';
 our $header = <<"EOF";
 <!DOCTYPE html>
 <html><head><title>Apache::MiniBlog The Lightweight, fast Weblog </title>
-<link href="http://localhost/css/miniblog_layout.css" rel="stylesheet" type="text/css"><meta charset="UTF-8">
+<link href="/css/miniblog_layout.css" rel="stylesheet" type="text/css"><meta charset="UTF-8">
 <style type="text/css">
 
 h1 {
@@ -97,14 +96,30 @@ if ($method eq 'GET'){
         tie %session, 'Apache::Session::SQLite', $session_id, 
                 { DataSource => "dbi:SQLite:$storage_path/sessions.db" }; 
 
-# we were probably logged in, real action, or breakage 
-            
 
-        if ($session{is_logged_in}){
+        my $action = $args->{action};
+
 
 # check for action
 # here we can cascade a 'dispatch' to some function
-            if ( my $action = $args->{action} ){
+     if ( my $action = $args->{action} ){
+
+        if ($action eq 'Login') {
+            $footer = make_footer([], [], undef);
+            print <<"EOF";
+$header
+<h3>Login Here</h3> 
+<form action="$myurl" method="post">
+Username: <input type="text" name="username">
+Password: <input type="password" name="password"> 
+<input type="submit" value="Login"></form>
+$footer
+EOF
+        } # action:Login 
+# in theory, all else should fail?
+# we were probably logged in, real action, or breakage 
+        if ($session{is_logged_in}){
+
                 if ($action eq 'Logout'){
                     $session{is_logged_in}=0; 
                     print <<"EOF";
@@ -127,14 +142,16 @@ EOF
 
                     $sth->execute($session_id);
                     my $user_data = $sth->fetchrow_hashref(); 
+
 print "Action = ", $action if $debug;
+
 # probably logged in, must want to see *something*
                     if ($action eq 'Default'){ 
                         $footer =
                     make_footer(undef, undef, $session_id, $user_data->{role});
 
                         my $post =
-                        render_post([$session{last_yaml},LoadFile("$yaml_path/$session{last_yaml}")],$session_id);
+                        render_post([$session{last_yaml},LoadFile("$yaml_path/$session{last_yaml}")],$session_id, 0);
                         print <<"EOF";
 $header
 $post
@@ -142,28 +159,15 @@ $footer
 EOF
                     } # action:Default   
                     elsif ($action eq 'Articles'){
-                        $footer = make_footer
-                            (undef, undef, $session_id, $user_data->{role});
-
-                        opendir  D, $yaml_path or die $!;
-
-                    my $offset = $session{offset} || 0;
-                    my @yaml_files = map {[$_,LoadFile("$yaml_path/$_")]}
-                        (grep(! /^\.{1,2}$/, sort (readdir D)))[$offset .. ($offset + $limit)];
-
-                    my $entries = '';
-                    $entries .= render_post($_, $session_id,1) for (@yaml_files);
-                    
-                    print <<"EOF";
-$header 
-$entries 
-$footer
-EOF
+# my ( $actions_links, $functions_forms, $session_id, $role, $link_wanted, $article, $caller) = @_; 
+public_reader(undef, undef, $session_id, $user_data->{role}, 1, undef, 'Articles'); # link wanted
                         
                     } # action:Articles
 
                     elsif ($action eq 'Pick'){ 
                         my $yaml = $args->{file};
+# change to public_render here
+# we need to reset the offset to *this file* :(
                         if ($user_data->{role} eq 'Admin'){
                             $footer = make_footer
                             (['Logout'], ['Edit'], $session_id, $user_data->{role},$yaml);
@@ -184,41 +188,27 @@ EOF
                         
                     } # action:Pick
                 } # not logout, opened user data
-            }# if logged in and action # session is_logged_in
-
-# drop mod_perl session object -- less likely SQLite locks?
-        
-        } #if logged in 
+            } # IF LOGGED IN
+        } # IF ACTION #if logged in 
         else { # empty action with session
 
 # pagination track?
 # so, most folks will wind up here, session, not logged in, no action 
 
-public_reader($session_id); 
-
+public_reader(undef, undef, $session_id); 
         }
 
     undef %session;
     } # if session
     elsif (my $action = $args->{action} ){ 
 
+print 'action: ', $action if $debug;
+
 # no session, so requests from the wild, like a login request 
-        if ($action eq 'Login') {
-        $footer = make_footer([], [], undef);
-        print <<"EOF";
-$header
-<h3>Login Here</h3> 
-<form action="$myurl" method="post">
-Username: <input type="text" name="username">
-Password: <input type="password" name="password"> 
-<input type="submit" value="Login"></form>
-$footer
-EOF
-        } # action:Login 
     }
 # Display something to the "public": the root of the blog engine, initial page
 # initial session id for pagination
-     else {public_reader();}
+     else {public_reader()}
      # display the root of the site
 } # GET
 
@@ -256,14 +246,7 @@ elsif ($method eq 'POST') {
 
 # no action was given. A "default" page.
 if (! $action){
-            print <<"EOF";
-$header
-<h4>remember to log out!</h4>
-<p>seems this is the default landing page, if no valid function is called. Cool.
-
-<p>Maybe the recent articles in the middle, actions on the right, where stats would be for a viewer, with navigation (drafts, vs published, etc. ) and meta-actions on the left.</p>
-$footer
-EOF
+    print $error;
 }
 
 # Action was posted in form
@@ -314,7 +297,8 @@ EOF
 # PUBLISH
     elsif ($action eq 'Publish'){ 
 my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = gmtime; 
-        my $datetime = $mon + 1 . "/$mday/" . $year+1900 . " $hour:$min GMT" ;
+        $mon += 1; $year += 1900; 
+        my $datetime = "$mon/$mday/$year $hour:$min GMT" ;
         my $title =  $args->{Title};
         my $description = $args->{Description};
         my $author = $args->{Author};
@@ -337,38 +321,54 @@ my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = gmtime;
 EOF
     }
      
+    else {
+        # s/b error
+$footer = render_footer([],[], $session_id);
+        print <<"EOF";
+$header
+<p>this is logged in, no valid function called.
+<p>$args->{action} is not valid. Sorry!</p>
+$footer
+EOF
+    }
 } # else we have an action, the action list
         } # session is_logged_in
         else { 
-# WTF, session open, post request, but not logged in? 
+# WTF, post request, but not logged in? 
             print $error;
         }
-    } # has session_id
-    else { 
-# do login, no session yet 
+    } # has session_id passed via form (as in after login and p/u old session)
+    else {
+# do login, as there's nothing else do do via POST/form if you aren't logged in
         if ((my $user=$args->{username}) && (my $pass=$args->{password})){
+
             if (my ($user_data, $session) = check_password ( $user, $pass )){ 
-                my $session_id = $session->{_session_id};
+
 # we passed! Go to Admin/User "landing page" with a session passed back.  
-                if ($user_data->{role} eq 'Admin'){
-                    $footer =
-                    make_footer(['Logout','Articles'],['Add','Edit','Users'], $session_id);
+                my $session_id = $session->{_session_id};
+                my $role = $user_data->{role};
+                if ( $role eq 'Admin'){
+print "role: ", $role if $debug; 
+
+                public_reader(['Logout','Articles'],['Add','Edit','Users'], $session_id, $role, 0, $announce_yaml);
                 }
                 else {
-                    $footer = make_footer(['Logout'], ['Add'], $session_id);
+
+                public_reader(['Logout','Articles'],['Add'], $session_id, $role, 0, $announce_yaml); # can edit announce article
+
                 }
  
-my $announce= LoadFile("$yaml_path/$announce_yaml");
-$session->{last_yaml}=$announce_yaml;
-print <<"EOF";
-$header
-<p>Howdy, $user_data->{username}!</p>
-<h2>$announce->{title}</h2>
-<h3>$announce->{description}</h3>
-<h4>$announce->{author}</h4>
-$announce->{copy}
-$footer
-EOF
+# my $announce= LoadFile("$yaml_path/$announce_yaml");
+# $session->{last_yaml}=$announce_yaml;
+# print <<"EOF";
+# $header
+# <p>Howdy, $user_data->{username}!</p>
+# <h2>$announce->{title}</h2>
+# <h3>$announce->{description}</h3>
+# <h4>$announce->{author}</h4>
+# $announce->{copy}
+# $footer
+# EOF
                 
 # close the session we opened at successful login
             undef $session;
@@ -382,7 +382,7 @@ EOF
 
 sub check_password {
     my ($user_name, $pass_given) = @_;
-    if ($user_name){
+    if ($user_name && $pass_given){
         my $dbh = DBI->connect("dbi:SQLite:$storage_path/users.db","","", { sqlite_use_immediate_transaction => 1, RaiseError => 1, AutoCommit => 1  });
         my $sth = $dbh->prepare("select * from users where username=?");
         $sth->execute($user_name);
@@ -448,7 +448,17 @@ EOF
                 $session{is_logged_in} = 1;
 # get the session id
                 my $session_id = $session{_session_id}; 
-# put in the user record
+
+# get the new list of files 
+        opendir  D, $yaml_path or die $!; 
+            my @yaml_files =  grep (! /^\.{1,2}$/, sort (readdir D));
+# pull out our announcement to the users 
+            @yaml_files = map {grep (! /^$announce_yaml$/, $_)} @yaml_files;
+            
+# put stuff in the user record
+                $session{dirlist} = [@yaml_files];
+                $session{offset} = 0; # reusing old session, is that an issue?
+                $session{last_yaml} = $announce_yaml; # shouldn't be needed..??
                 my $sth=$dbh->prepare("update users set last_session_id = ? where (id = ?)");
                 $sth->execute($session_id, $user_id); 
 # return a reference to this session and the user data
@@ -474,8 +484,7 @@ sub make_password {
 }
 
 sub make_footer {
-    my ( $actions_links, $functions_forms, $session_id, $role,
-    $yamlfile) = @_;
+    my ( $actions_links, $functions_forms, $session_id, $role, $yamlfile) = @_;
     $role = 'Guest' unless $role;
     $yamlfile = '' unless $yamlfile;
     $session_id = '' unless $session_id;
@@ -512,13 +521,17 @@ return $footer;
 }
 
 sub render_post {
-    my ( $yamlfile, $session_id, $link_wanted ) = @_;
+    # if a single post is wanted, called once, or in a loop for a page of posts
+    my ( $yamlfile, $session_id, $link_wanted) = @_;
     my $yaml = $yamlfile->[0];
     my $post = $yamlfile->[1];
-    my $copy = join "</p>\n<p>", (split /[\r\n]+/, $post->{copy});
+    $session_id = '' unless $session_id; # no undef warnings below
+    my $copy = join "</p>\n<p>", (split /\r\n(?:\r\n)+/, $post->{copy});
+# don't do this, I think.
+#    $copy =~ s/\r\n/<br \/>/g;
     $copy = '<p>' .  $copy  . '</p>';
     my $drill_link ='';
-    $drill_link= "<a href=\"${myurl}?action=Pick&amp;file=$yaml&amp;session_id=$session_id\">Pick</a>" if ($session_id && $link_wanted); 
+    $drill_link= "<a href=\"${myurl}?action=Pick&amp;file=$yaml&amp;session_id=$session_id\">Link</a>" if ($link_wanted);
     return <<"EOF";
 <article>  
 <h1>$post->{title}</h1>
@@ -532,49 +545,63 @@ EOF
 }
 
 sub public_reader {
-    my $session_id = shift;
-# maybe this should come in the @_
-    $footer = make_footer(['SuckinJunk','ButtSniff','Douchebag','Login'], []);
+    
+    my ( $actions_links, $functions_forms, $session_id, $role, $link_wanted, $article, $caller) = @_; 
 
     my %session; 
     tie %session, 'Apache::Session::SQLite', ($session_id || undef),
  { DataSource => "dbi:SQLite:$storage_path/sessions.db" }; 
 
     $session_id = $session{_session_id};
+    $footer = make_footer($actions_links, $functions_forms, $session_id, $role);
+    my $entries = '';
+    my $more_needed = '' ;
 
+    if ($article){
+        print "rendering an article: ", $article if $debug;
+        print "last yaml: ", $session{last_yaml} if $debug;
+        $session{last_yaml}=$article;
+        $entries = render_post([$article,LoadFile("$yaml_path/$article")], $session_id, $link_wanted);
+
+    }
+
+# render the blog entries
+    else {
     my @yaml_files ;
-
-    if (! $session{dirlist}){ 
+# populate the session with dir listing, if not there 
+    if (! $session{dirlist}){
+        print "announce: ", $announce_yaml if $debug;
         opendir  D, $yaml_path or die $!; 
-        @yaml_files = grep(! /^\.{1,2}$/, sort (readdir D));
+        @yaml_files =  grep (! /^\.{1,2}$/, sort (readdir D));
+ @yaml_files = map {grep (! /^$announce_yaml$/, $_)} @yaml_files;
         $session{dirlist} = [@yaml_files];
     }
     else {
         @yaml_files = @{$session{dirlist}};
     }
 
-    my $offset = ( (defined $session{offset}) ? $session{offset} : 0); 
+    my $offset = ( (defined $session{offset}) ? $session{offset} : 0 ); 
 
     my $target = $offset + $limit ;
     my $files_count = $#yaml_files + 1;
 
-    my $more_needed = "<a href=\"$myurl?session_id=$session_id\">more</a>";
+    $more_needed = "<a href=\"$myurl?session_id=$session_id&amp;action=Articles\">more</a>";
     if ($target > $files_count){
         $target = $files_count;
         $offset = $files_count - $limit;
     $more_needed = "<h6>hey… that’s all folks!</h6>";
+    $session{offset}= 0;
     }
-
 
 #  update the offset in the session
 
-     $session{offset}=$target + 1;   
+     $session{offset}=$target + 1;
+   my @posts = map {[$_,LoadFile("$yaml_path/$_")]} @yaml_files[$offset .. ($target - 1)]; 
+# hack to get links
+$link_wanted = 1 if ($caller eq 'Articles');
+    $entries .= render_post($_, $session_id,$link_wanted) for (@posts);
+}
 
-   my @posts = map {[$_,LoadFile("$yaml_path/$_")]} @yaml_files[$offset .. ($target - 1)];
-
-
-    my $entries = '';
-    $entries .= render_post($_, undef,0, $session_id) for (@posts);
 
     print <<"EOF";
 $header 
@@ -584,33 +611,9 @@ $footer
 
 EOF
 
-}
+} # public reader
 
 
-sub keepme {
-#  
-#         $footer = make_footer(['SuckinJunk','ButtSniff','Douchebag','Login'], []);
-#         opendir  D, $yaml_path or die $!; 
-#         my $session_id = $args->{session_id} || undef;
-#         my %session; 
-#         tie %session, 'Apache::Session::SQLite', $session_id ,
-#      { DataSource => "dbi:SQLite:$storage_path/sessions.db" }; 
-#         $session_id = $session{_session_id};
-#         my $offset = 0;
-#         my $target = $offset + $limit;
-#         my @yaml_files = map {[$_,LoadFile("$yaml_path/$_")]} (grep(! /^\.{1,2}$/, sort (readdir D)))[$offset .. $target];
-# #  update the offset in the session
-#         $session{offset}=$target + 1;
-# 
-#         my $entries = '';
-#         $entries .= render_post($_, undef,0, $session_id) for (@yaml_files);
-#         
-#         print <<"EOF";
-# $header 
-# $entries 
-# $footer
-# <a href="$myurl?session_id=$session_id">more</a>
-# EOF
-    }
+
 
 # vim: paste:ai:ts=4:sw=4:sts=4:expandtab:ft=perl
