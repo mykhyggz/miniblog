@@ -96,11 +96,6 @@ if ($method eq 'GET'){
         tie %session, 'Apache::Session::SQLite', $session_id, 
                 { DataSource => "dbi:SQLite:$storage_path/sessions.db" }; 
 
-
-        my $action = $args->{action};
-
-
-# check for action
 # here we can cascade a 'dispatch' to some function
      if ( my $action = $args->{action} ){
 
@@ -115,24 +110,20 @@ Password: <input type="password" name="password">
 <input type="submit" value="Login"></form>
 $footer
 EOF
-        } # action:Login 
-# in theory, all else should fail?
-# we were probably logged in, real action, or breakage 
+        } # action:Login  - what else 'action' from non-logged-in user?
+
+# we were probably logged in
         if ($session{is_logged_in}){
 
-                if ($action eq 'Logout'){
+                if ($action eq 'Logout'){ # short-circuit?
                     $session{is_logged_in}=0; 
+                    $session{offset}=0; # maybe?
                     print <<"EOF";
 <html><head> <meta http-equiv="refresh" content="5; url=$myurl"></head><body>
-<h2>Logged Out!</h2> 
-<!--p>Session: $session_id<br>Action: $action</p-->
-<p>Redirecting to Home Page</p>
-</body></html>
+<h2>Logged Out!</h2><p>Redirecting to Home Page</p></body></html>
 EOF
-            
                 } # action:Logout
                 else {
-
 # get user data 
                     my $dbh = DBI->
                         connect("dbi:SQLite:$storage_path/users.db","","",
@@ -143,49 +134,29 @@ EOF
                     $sth->execute($session_id);
                     my $user_data = $sth->fetchrow_hashref(); 
 
-print "Action = ", $action if $debug;
-
 # probably logged in, must want to see *something*
                     if ($action eq 'Default'){ 
-                        $footer =
-                    make_footer(undef, undef, $session_id, $user_data->{role});
-
-                        my $post =
-                        render_post([$session{last_yaml},LoadFile("$yaml_path/$session{last_yaml}")],$session_id, 0);
-                        print <<"EOF";
-$header
-$post
-$footer
-EOF
+                        public_reader(undef, undef, $session_id,
+                            $user_data->{role},0,$session{last_yaml});
                     } # action:Default   
-                    elsif ($action eq 'Articles'){
-# my ( $actions_links, $functions_forms, $session_id, $role, $link_wanted, $article, $caller) = @_; 
-public_reader(undef, undef, $session_id, $user_data->{role}, 1, undef, 'Articles'); # link wanted
-                        
+                    elsif ($action eq 'Articles'){ 
+                        # link wanted wired into reader 
+                        public_reader(undef, undef, $session_id, 
+                            $user_data->{role}, 1, undef, 'Articles'); 
                     } # action:Articles
 
                     elsif ($action eq 'Pick'){ 
                         my $yaml = $args->{file};
-# change to public_render here
+                        $session{last_yaml}=$yaml; 
 # we need to reset the offset to *this file* :(
-                        if ($user_data->{role} eq 'Admin'){
-                            $footer = make_footer
-                            (['Logout'], ['Edit'], $session_id, $user_data->{role},$yaml);
+                        if ($user_data->{role} eq 'Admin'){ 
+                            public_reader(['Logout'], ['Edit','Comment'],
+                                $session_id, $user_data->{role},0,$yaml);
                         }
-                        else { 
-                            $footer = make_footer
-                            (['Logout'], ['Comment'], $session_id, $user_data->{role},$yaml);
+                        else {
+                            public_reader(['Logout'], ['Comment'],
+                                $session_id, $user_data->{role},0,$yaml);
                         }
-
-                        my $post = render_post
-                          ([$yaml,LoadFile("$yaml_path/$yaml")], $session_id,0);
-
-                        print <<"EOF";
-$header 
-$post
-$footer
-EOF
-                        
                     } # action:Pick
                 } # not logout, opened user data
             } # IF LOGGED IN
@@ -194,17 +165,17 @@ EOF
 
 # pagination track?
 # so, most folks will wind up here, session, not logged in, no action 
-
 public_reader(undef, undef, $session_id); 
         }
 
-    undef %session;
+    undef %session; # likely not needed
     } # if session
     elsif (my $action = $args->{action} ){ 
 
-print 'action: ', $action if $debug;
-
+print $error; 
 # no session, so requests from the wild, like a login request 
+    # actually, the login is after a session is established now, so...
+    # this would be an "error".
     }
 # Display something to the "public": the root of the blog engine, initial page
 # initial session id for pagination
@@ -235,6 +206,7 @@ elsif ($method eq 'POST') {
 
             $sth->execute($session_id);
             my $user_data = $sth->fetchrow_hashref(); 
+            # Why are we MAKING A FOOTER HERE?
             if ($user_data->{role} eq 'Admin'){
                 $footer = make_footer( ['Logout'],
                 ['Add','Edit', 'AddUser'], $session_id );
@@ -298,6 +270,7 @@ EOF
     elsif ($action eq 'Publish'){ 
 my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = gmtime; 
         $mon += 1; $year += 1900; 
+# put a date on it, title, etc., from the form
         my $datetime = "$mon/$mday/$year $hour:$min GMT" ;
         my $title =  $args->{Title};
         my $description = $args->{Description};
@@ -305,15 +278,21 @@ my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = gmtime;
         my $copy = $args->{Copy};
         my $post= {title =>$title, description =>$description,
             author =>$author, copy =>$copy, datetime=>$datetime};
+
+# uuid for the file name. Whoops! Should probably be fixed.
         my $ug =  new Data::UUID;
         my $yaml_file = $ug->to_string($ug->create()) . '_';
+
+# append something useful to it, like the title
         ( my $hrid = $args->{Title})=~s/[^a-zA-Z0-9]/_/g ;
         $yaml_file .= $hrid;
         $yaml_file .= '.yml';        
+
 # special cases for special posts
         $yaml_file = $args->{yamlfile} if (defined  $args->{yamlfile});
         DumpFile("$yaml_path/$yaml_file", $post) or die $!; 
-        $session{last_yaml}=$yaml_file;
+        # put in 'Pick'
+        # $session{last_yaml}=$yaml_file;
         print <<"EOF"; 
 <html><head> <meta http-equiv="refresh" content="2; url=${myurl}?session_id=$session_id&amp;action=Default"></head><body>
 <p> Saved $yaml_file... redirecting</p>
@@ -371,10 +350,10 @@ print "role: ", $role if $debug;
 # EOF
                 
 # close the session we opened at successful login
-            undef $session;
+            undef $session; # likely not needed
             } # password_ok, new session and landing pages
             else {
-            print $error;
+                print $error;
             }
         } # provided user and pass
     } # no session ID
@@ -382,71 +361,69 @@ print "role: ", $role if $debug;
 
 sub check_password {
     my ($user_name, $pass_given) = @_;
-    if ($user_name && $pass_given){
+    if ($user_name){
         my $dbh = DBI->connect("dbi:SQLite:$storage_path/users.db","","", { sqlite_use_immediate_transaction => 1, RaiseError => 1, AutoCommit => 1  });
         my $sth = $dbh->prepare("select * from users where username=?");
         $sth->execute($user_name);
         my $user_data = $sth->fetchrow_hashref();
-        my $hash_returned = $user_data->{password};
-        my $user_id = $user_data->{ id };
+
+        my $user_id = $user_data->{ id }; # we never use this, do we?
+
+# we get the last session when logging in, in theory, always the same
+# when the sessions.db wants to be gone, filter on last session id
+# in the users.db
+
         my $session_id = $user_data->{ last_session_id }; 
+        my $hash_returned = $user_data->{password};
+
         if (! $hash_returned){
-    
-# user has no password stored, get one in there 
-            if ($pass_given){
 
-    # first Admin login, or temporary password request for new user with password
-                if  (make_password( $user_id, $pass_given, $dbh)){
-                    print <<"EOF";
-<html><head><meta http-equiv="refresh" content="5; url=${myurl}?action=Login"></head><body>
-<p>Congrats! $user_name has a password! Redirecting to login...</p>
-<p>ID: $user_data->{id}</p>
-<p>Name: $user_data->{username}</p>
-<p>Email: $user_data->{email}</p>
-<p>Role: $user_data->{role}</p>
-</body></html>
-EOF
-exit; 
-                } # password made, redirected
-                else {
-                    print $error;
-                    # error, password routine
-                }
-            }
-# user still needs to provide a password, prompt for one
-            else { 
+# user has no password stored, get one in there
+# first Admin login, or temporary password request for new user with password
 
-                $footer = make_footer(['Home'], []);
+            if (! $pass_given){ # post a password 
+                $footer = make_footer([], []);
                 print <<"EOF";
 $header
 <p>$user_name, you have an empty password. This will not do.</p>
 <form action="$myurl" method="post">
-Password: <input type="password" name="password" method="post"> 
+Password: <input type="password" name="password"> 
 <input type="hidden" name="username" value="$user_id">
 <input type="submit" value="Set Password"></form>
 $footer
 EOF
-            } # pass not given, or pass given and hash stored 
-        } # user name, but no hash 
-# we have a password hash in DB to match, so log 'em in
+                exit;
+            }
+            elsif (make_password( $user_id, $pass_given, $dbh)){
+                    print <<"EOF";
+<html><head><meta http-equiv="refresh" content="5; url=${myurl}?action=Login"></head><body><p>Congrats! $user_name has a password! Redirecting to login...</p></body></html>
+EOF
+                    exit; 
+                } 
+            else {
+                print $error;
+                # error, make_password routine or ??
+            } 
+        } # no hash  in DB 
         else {
+
+# we have a password hash in DB to match, so log 'em in
             my ($salt,$hash_tomatch) = split ':', $hash_returned;
             my $sha_hash = sha256_hex($pass_given, "{$salt}"); 
 
-# match DB entry against calculated hash
+
             if ($sha_hash eq $hash_tomatch){
-                my %session; 
-# make a fresh session for a first-time visitor, or maybe re-open
-# "maybe" b/c the sessions DB should be 
+
+# DB entry matched against calculated hash, so authenticated
+                my %session;
                 eval { tie %session, 'Apache::Session::SQLite', $session_id, 
                      { DataSource => "dbi:SQLite:$storage_path/sessions.db" };
                 };
                 if ($@) { tie %session, 'Apache::Session::SQLite', undef, 
                      { DataSource => "dbi:SQLite:$storage_path/sessions.db" };
                 }
-# mark the session logged in
-                $session{is_logged_in} = 1;
-# get the session id
+
+                $session{is_logged_in} = 1; 
                 my $session_id = $session{_session_id}; 
 
 # get the new list of files 
@@ -584,8 +561,8 @@ sub public_reader {
 
     my $target = $offset + $limit ;
     my $files_count = $#yaml_files + 1;
-
-    $more_needed = "<a href=\"$myurl?session_id=$session_id&amp;action=Articles\">more</a>";
+    $caller =  "&amp;action=$caller" if $caller; # leave action undef
+    $more_needed = "<a href=\"$myurl?session_id=${session_id}${caller}\">more</a>";
     if ($target > $files_count){
         $target = $files_count;
         $offset = $files_count - $limit;

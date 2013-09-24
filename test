@@ -1,0 +1,18 @@
+#!/usr/bin/perl
+
+use Net::SSH::Perl;
+use Test::Simple;
+use HTTP::Lite;
+use Test::Simple tests=>2;
+use strict;
+use warnings;
+
+my $ssh = Net::SSH::Perl->new("evolone.org");
+$ssh->login("mykhyggz");
+my($stdout, $stderr, $exit) = $ssh->cmd("ls|head -1");
+ok( $stdout =~/^smstest\.pl$/ );
+my $http = HTTP::Lite->new;
+my $req = $http->request("http://lbg2/perl/miniblog.pl");
+my $t=$http->body();
+$t =~ s/.*session_id=(.*)&amp;.*/$1/msig;
+ok ($t=~/^[a-f0-9]+$/, "got session ID");
