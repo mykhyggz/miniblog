@@ -44,8 +44,7 @@ our $header = <<"EOF";
 </head><body><div class="page-wrap"><section class="main-content">
 EOF
 
-# TO DO: s/b a sub which takes an error string... :)
-our $error = <<"EOF";
+our $public_error = <<"EOF";
 <html><head> <meta http-equiv="refresh" content="2; url=$myurl"></head><body>
 <h2>Whoops!</h2> 
 <p>Hmm... there should have been something... but here comes the homepage ;-/</p>
@@ -60,7 +59,7 @@ my $method = $r->method();
 if ($method eq 'GET'){
 
     # if a session id, then we have been here
-    if (my $session_id = $args->{session_id}){ 
+    if (my $session_id = $args->{session_id}){
 
 # grab session from the session asked for
 # not DRY, as we do it again twice, but IDK about stuffing it somewhere.
@@ -152,7 +151,8 @@ EOF
         undef %session; # likely not needed
     } # if session_id provided
     elsif (my $action = $args->{action} ){ 
-        print $error;  # should save the request and forward to login 
+# should save the request and forward to login 
+        print $public_error;
     }
 # Display something to the "public": the root of the blog engine, initial page
 # and initial session id for pagination
@@ -167,8 +167,7 @@ elsif ($method eq 'POST') {
     if (my $session_id=$args->{session_id}){
 
 # get our old session, which s/b there b/c you just logged in... or forgot
-# to log out and you (or someone else) logged in with session id only...??
-# login takes place w/o session_id, as you try to get your old one back
+# to log out and you (or someone else) logged in with session id only...??  
         my %session; 
         tie %session, 'Apache::Session::SQLite', $session_id,
      { DataSource => "dbi:SQLite:$storage_path/sessions.db" }; 
@@ -186,8 +185,7 @@ elsif ($method eq 'POST') {
 
             my $role = $user_data->{role};
 
-# cascade of 'POST' actions
-
+# cascade of 'POST' actions 
 #ADD
             if ($action eq 'Add'){ 
         # my $page_to_edit = 'somefile.yml'; <input type="hidden" name="yamlfile" value="$page_to_edit"> 
@@ -286,12 +284,12 @@ EOF
                 undef $session; # likely not needed
                 } # password_ok, new session and landing pages
                 else {
-                    print $error;
+                   error(undef,"bad login"); 
                 }
             } # provided user and pass 
             else {
 # WTF, post request, but no session is_logged_in? 
-                print $error;
+                   error(undef,"login first.. how'd you even *get* here?");
             }
         } # has session_id passed via form but not logged in 
     } # has session ID
@@ -341,8 +339,7 @@ EOF
                     exit; 
                 } 
             else {
-                print $error;
-                # error, make_password routine or ??
+                print $public_error;
             } 
         } # no hash  in DB 
         else {
