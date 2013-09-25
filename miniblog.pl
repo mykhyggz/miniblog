@@ -39,41 +39,8 @@ our $header = <<"EOF";
 <!DOCTYPE html>
 <html><head><title>Apache::MiniBlog The Lightweight, fast Weblog </title>
 <link href="/css/miniblog_layout.css" rel="stylesheet" type="text/css"><meta charset="UTF-8">
-<style type="text/css">
-
-h1 {
-  font: bold 2em Sans-Serif;
-  margin: 1em 0 .15em 0;
-}
-h2 { 
-  font: bold 1.5em Sans-Serif;
-  margin: 0 0 .15em 0; 
-}
-p {
-  margin: 2em 0 1em 7em;
-}
-
-hr {
-  color rgb(200,200,200); 
-  width: 50%; margin-top: 2em; margin-bottom: 3em;
-} 
-
-article h2, article h3, article, h4 {
- font-family: Helvetica,Arial,sans-serif;
- color: rgb(120, 120, 120);
- margin: 0 0 0 0
-}
-
-article h1, article h2 { 
- color: rgb(200, 200, 200);
-} 
-
-article p {
- color: rgb(50, 50, 50);
- font-family: Bookman,Times,serif; 
- font-size: 10pt;
-}
-</style>
+<link href="/css/miniblog_styles.css" rel="stylesheet" type="text/css"><meta charset="UTF-8">
+<style type="text/css"></style>
 </head><body><div class="page-wrap"><section class="main-content">
 EOF
 
