@@ -77,54 +77,63 @@ article p {
 </head><body><div class="page-wrap"><section class="main-content">
 EOF
 
+# TO DO: s/b a sub which takes an error string... :)
 our $error = <<"EOF";
 <html><head> <meta http-equiv="refresh" content="2; url=$myurl"></head><body>
 <h2>Whoops!</h2> 
 <p>Hmm... there should have been something... but here comes the homepage ;-/</p>
 </body></html>
 EOF
+
 $r->content_type('text/html');
 
 my $method = $r->method(); 
 
 # if a 'GET', dispatch a few basic commands, all edits are POST
 if ($method eq 'GET'){
+
+    # if a session id, then we have been here
     if (my $session_id = $args->{session_id}){ 
 
 # grab session from the session asked for
+# not DRY, as we do it again twice, but IDK about stuffing it somewhere.
+# as it's crappy to write to a tied hashREF.
+
         my %session; 
         tie %session, 'Apache::Session::SQLite', $session_id, 
                 { DataSource => "dbi:SQLite:$storage_path/sessions.db" }; 
 
 # here we can cascade a 'dispatch' to some function
-     if ( my $action = $args->{action} ){
+         if ( my $action = $args->{action} ){
 
-        if ($action eq 'Login') {
-            $footer = make_footer([], [], undef);
-            print <<"EOF";
+            if ($action eq 'Login') {
+                $footer = make_footer([], [], undef);
+                print <<"EOF";
 $header
 <h3>Login Here</h3> 
 <form action="$myurl" method="post">
 Username: <input type="text" name="username">
 Password: <input type="password" name="password"> 
+<input type="hidden" name="session_id" value="$session_id">
 <input type="submit" value="Login"></form>
 $footer
 EOF
-        } # action:Login  - what else 'action' from non-logged-in user?
+exit;
+            } # action:Login  - what else 'action' from non-logged-in user?
 
-# we were probably logged in
-        if ($session{is_logged_in}){
+# we were probably, and should have been, logged in. An 'else' here?
+            if ($session{is_logged_in}){
 
                 if ($action eq 'Logout'){ # short-circuit?
                     $session{is_logged_in}=0; 
-                    $session{offset}=0; # maybe?
+                  #  $session{offset}=0; #they get new session, so keep offset
                     print <<"EOF";
 <html><head> <meta http-equiv="refresh" content="5; url=$myurl"></head><body>
 <h2>Logged Out!</h2><p>Redirecting to Home Page</p></body></html>
 EOF
                 } # action:Logout
                 else {
-# get user data 
+# not logging out, so get user data 
                     my $dbh = DBI->
                         connect("dbi:SQLite:$storage_path/users.db","","",
 { sqlite_use_immediate_transaction => 1, RaiseError => 1, AutoCommit => 1  });
@@ -134,20 +143,25 @@ EOF
                     $sth->execute($session_id);
                     my $user_data = $sth->fetchrow_hashref(); 
 
-# probably logged in, must want to see *something*
+# view a new publish
                     if ($action eq 'Default'){ 
                         public_reader(undef, undef, $session_id,
                             $user_data->{role},0,$session{last_yaml});
-                    } # action:Default   
+                    } # action : Default   
+
+# view a list, paginated
                     elsif ($action eq 'Articles'){ 
                         # link wanted wired into reader 
                         public_reader(undef, undef, $session_id, 
                             $user_data->{role}, 1, undef, 'Articles'); 
                     } # action:Articles
 
+# pick a single post
                     elsif ($action eq 'Pick'){ 
                         my $yaml = $args->{file};
                         $session{last_yaml}=$yaml; 
+
+# TO DO: move the role logic to the render part, or below
 # we need to reset the offset to *this file* :(
                         if ($user_data->{role} eq 'Admin'){ 
                             public_reader(['Logout'], ['Edit','Comment'],
@@ -160,27 +174,24 @@ EOF
                     } # action:Pick
                 } # not logout, opened user data
             } # IF LOGGED IN
-        } # IF ACTION #if logged in 
-        else { # empty action with session
+        } # IF ACTION, but not logged in
+        else {
 
-# pagination track?
-# so, most folks will wind up here, session, not logged in, no action 
-public_reader(undef, undef, $session_id); 
-        }
+# pagination track
+# most folks will wind up here, session, not logged in, no action 
+            public_reader(undef, undef, $session_id); 
+        } # empty action with session
 
-    undef %session; # likely not needed
-    } # if session
+        undef %session; # likely not needed
+    } # if session_id provided
     elsif (my $action = $args->{action} ){ 
-
-print $error; 
-# no session, so requests from the wild, like a login request 
-    # actually, the login is after a session is established now, so...
-    # this would be an "error".
+        print $error;  # should save the request and forward to login 
     }
 # Display something to the "public": the root of the blog engine, initial page
-# initial session id for pagination
-     else {public_reader()}
-     # display the root of the site
+# and initial session id for pagination
+     else {
+         public_reader()
+     } # display the root of the site
 } # GET
 
 elsif ($method eq 'POST') {
@@ -190,14 +201,13 @@ elsif ($method eq 'POST') {
 
 # get our old session, which s/b there b/c you just logged in... or forgot
 # to log out and you (or someone else) logged in with session id only...??
+# login takes place w/o session_id, as you try to get your old one back
         my %session; 
         tie %session, 'Apache::Session::SQLite', $session_id,
      { DataSource => "dbi:SQLite:$storage_path/sessions.db" }; 
 
 # the extent of our security, so don't forget to log *out*! ;-)
         if ($session{is_logged_in}){
-
-# the meat of it, "is logged in", now, what can user/admin do?
 # get user data from DBI here... 
             my $action = $args->{action};
             my $dbh = DBI->connect("dbi:SQLite:$storage_path/users.db","","",
@@ -205,29 +215,17 @@ elsif ($method eq 'POST') {
             my $sth=$dbh->prepare("select * from users where last_session_id=?");
 
             $sth->execute($session_id);
-            my $user_data = $sth->fetchrow_hashref(); 
-            # Why are we MAKING A FOOTER HERE?
-            if ($user_data->{role} eq 'Admin'){
-                $footer = make_footer( ['Logout'],
-                ['Add','Edit', 'AddUser'], $session_id );
-            }
-            elsif ($user_data->{role} eq 'User'){
-                $footer = make_footer(['Logout'], ['Comment'], $session_id);
-            }
+            my $user_data = $sth->fetchrow_hashref();
 
+            my $role = $user_data->{role};
 
-# no action was given. A "default" page.
-if (! $action){
-    print $error;
-}
-
-# Action was posted in form
-else {
+# cascade of 'POST' actions
 
 #ADD
-    if ($action eq 'Add'){ 
+            if ($action eq 'Add'){ 
         # my $page_to_edit = 'somefile.yml'; <input type="hidden" name="yamlfile" value="$page_to_edit"> 
-        print <<"EOF";
+        # TO DO: Turn this to load_edit_form for 'Add', 'Edit'
+                print <<"EOF";
 $header
 <form action="$myurl" method="post">
 Title: <input type="text" name="Title" value=""><br />
@@ -240,18 +238,17 @@ Author: <input type="text" name="Author" value="$user_data->{username}"><br />
 <input type="submit" value="Publish"></form>
 $footer
 EOF
-    }
+            }
 #EDIT
-    elsif ($action eq 'Edit'){ 
-        my $yamlfile = ( $args->{'yamlfile'} or $session{last_yaml});
-        my $post = LoadFile("$yaml_path/$yamlfile"); 
+            elsif ($action eq 'Edit'){ 
+                my $yamlfile = ( $args->{'yamlfile'} or $session{last_yaml});
+                my $post = LoadFile("$yaml_path/$yamlfile"); 
 
 # $actions_links, $functions_forms, $session_id, $role, $yamlfile
-        $footer = make_footer(['Logout'],[],$session_id,undef,$yamlfile);
+                $footer = make_footer(['Logout'],[],$session_id,undef,$yamlfile);
 
-        print <<"EOF";
+                print <<"EOF";
 $header
-
 <form action="$myurl" method="post"> 
 Title: <input type="text" name="Title" size=70 value="$post->{title}"><br />
 Description: <textarea name="Description" rows=2 cols=80>$post->{description}</textarea><br />
@@ -265,102 +262,78 @@ Author: <input type="text" name="Author" size=60 value="$post->{author}"><br />
 <input type="submit" value="Publish"></form>
 $footer
 EOF
-    }
+            }
 # PUBLISH
-    elsif ($action eq 'Publish'){ 
-my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = gmtime; 
-        $mon += 1; $year += 1900; 
+            elsif ($action eq 'Publish'){ 
+                my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = gmtime; 
+                $mon += 1; $year += 1900; 
 # put a date on it, title, etc., from the form
-        my $datetime = "$mon/$mday/$year $hour:$min GMT" ;
-        my $title =  $args->{Title};
-        my $description = $args->{Description};
-        my $author = $args->{Author};
-        my $copy = $args->{Copy};
-        my $post= {title =>$title, description =>$description,
-            author =>$author, copy =>$copy, datetime=>$datetime};
-
-# uuid for the file name. Whoops! Should probably be fixed.
-        my $ug =  new Data::UUID;
-        my $yaml_file = $ug->to_string($ug->create()) . '_';
+                my $datetime = "$mon/$mday/$year $hour:$min GMT" ;
+                my $title =  $args->{Title};
+                my $description = $args->{Description};
+                my $author = $args->{Author};
+                my $copy = $args->{Copy};
+                my $post= {title =>$title, description =>$description,
+                    author =>$author, copy =>$copy, datetime=>$datetime};
+                my $yaml_file ;
+                unless ($yaml_file = $args->{yamlfile}){
+# uuid for the file name... 
+                    my $ug =  new Data::UUID;
+                    $yaml_file = $ug->to_string($ug->create()) . '_';
 
 # append something useful to it, like the title
-        ( my $hrid = $args->{Title})=~s/[^a-zA-Z0-9]/_/g ;
-        $yaml_file .= $hrid;
-        $yaml_file .= '.yml';        
-
-# special cases for special posts
-        $yaml_file = $args->{yamlfile} if (defined  $args->{yamlfile});
-        DumpFile("$yaml_path/$yaml_file", $post) or die $!; 
-        # put in 'Pick'
-        # $session{last_yaml}=$yaml_file;
+                    ( my $hrid = $args->{Title})=~s/[^a-zA-Z0-9]/_/g ;
+                    $yaml_file .= $hrid;
+                    $yaml_file .= '.yml';        
+                }
+                DumpFile("$yaml_path/$yaml_file", $post) or die $!;
         print <<"EOF"; 
 <html><head> <meta http-equiv="refresh" content="2; url=${myurl}?session_id=$session_id&amp;action=Default"></head><body>
 <p> Saved $yaml_file... redirecting</p>
 </body></html>
 EOF
-    }
+            }
      
-    else {
-        # s/b error
-$footer = render_footer([],[], $session_id);
-        print <<"EOF";
-$header
-<p>this is logged in, no valid function called.
-<p>$args->{action} is not valid. Sorry!</p>
-$footer
-EOF
-    }
-} # else we have an action, the action list
+            else {
+                error($session_id, "$action ain't valid");
+            }
         } # session is_logged_in
-        else { 
-# WTF, post request, but not logged in? 
-            print $error;
-        }
-    } # has session_id passed via form (as in after login and p/u old session)
-    else {
-# do login, as there's nothing else do do via POST/form if you aren't logged in
-        if ((my $user=$args->{username}) && (my $pass=$args->{password})){
 
-            if (my ($user_data, $session) = check_password ( $user, $pass )){ 
+# well, try to log 'em in, mr POST request not logged in...
+        else {
+            if ((my $user=$args->{username}) && (my $pass=$args->{password})){
+
+                if (my ($user_data, $session) = check_password ( $user, $pass,$session{dirlist} )){ 
 
 # we passed! Go to Admin/User "landing page" with a session passed back.  
                 my $session_id = $session->{_session_id};
                 my $role = $user_data->{role};
-                if ( $role eq 'Admin'){
-print "role: ", $role if $debug; 
+                    if ( $role eq 'Admin'){ 
+                        public_reader(['Logout','Articles'],['Add','Edit','Users'], $session_id, $role, 0, $announce_yaml);
+                    }
+                    else {
 
-                public_reader(['Logout','Articles'],['Add','Edit','Users'], $session_id, $role, 0, $announce_yaml);
-                }
+                        public_reader(['Logout','Articles'],['Add'], $session_id, $role, 0, $announce_yaml); # can edit announce article
+
+                    }
+                undef $session; # likely not needed
+                } # password_ok, new session and landing pages
                 else {
-
-                public_reader(['Logout','Articles'],['Add'], $session_id, $role, 0, $announce_yaml); # can edit announce article
-
+                    print $error;
                 }
- 
-# my $announce= LoadFile("$yaml_path/$announce_yaml");
-# $session->{last_yaml}=$announce_yaml;
-# print <<"EOF";
-# $header
-# <p>Howdy, $user_data->{username}!</p>
-# <h2>$announce->{title}</h2>
-# <h3>$announce->{description}</h3>
-# <h4>$announce->{author}</h4>
-# $announce->{copy}
-# $footer
-# EOF
-                
-# close the session we opened at successful login
-            undef $session; # likely not needed
-            } # password_ok, new session and landing pages
+            } # provided user and pass 
             else {
+# WTF, post request, but no session is_logged_in? 
                 print $error;
             }
-        } # provided user and pass
-    } # no session ID
+        } # has session_id passed via form but not logged in 
+    } # has session ID
 } # POST
 
+     ################### SUBS ####################
+
 sub check_password {
-    my ($user_name, $pass_given) = @_;
+    my ($user_name, $pass_given,$dir_list) = @_;
     if ($user_name){
         my $dbh = DBI->connect("dbi:SQLite:$storage_path/users.db","","", { sqlite_use_immediate_transaction => 1, RaiseError => 1, AutoCommit => 1  });
         my $sth = $dbh->prepare("select * from users where username=?");
@@ -411,7 +384,6 @@ EOF
             my ($salt,$hash_tomatch) = split ':', $hash_returned;
             my $sha_hash = sha256_hex($pass_given, "{$salt}"); 
 
-
             if ($sha_hash eq $hash_tomatch){
 
 # DB entry matched against calculated hash, so authenticated
@@ -427,19 +399,24 @@ EOF
                 my $session_id = $session{_session_id}; 
 
 # get the new list of files 
+# TO DO: Pass this from the anonymous session
+if (! $dir_list){
+
+print "LOGIN opening dirlist" if $debug;
+
         opendir  D, $yaml_path or die $!; 
             my @yaml_files =  grep (! /^\.{1,2}$/, sort (readdir D));
-# pull out our announcement to the users 
-            @yaml_files = map {grep (! /^$announce_yaml$/, $_)} @yaml_files;
-            
-# put stuff in the user record
+# pull out our login announcement
+            @yaml_files = map {grep (! /^$announce_yaml$/, $_)} @yaml_files; 
                 $session{dirlist} = [@yaml_files];
-                $session{offset} = 0; # reusing old session, is that an issue?
-                $session{last_yaml} = $announce_yaml; # shouldn't be needed..??
-                my $sth=$dbh->prepare("update users set last_session_id = ? where (id = ?)");
+}
+else {
+$session{dirlist} = $dir_list;
+}
+                my $sth=$dbh->prepare
+                    ("update users set last_session_id = ? where (id = ?)");
                 $sth->execute($session_id, $user_id); 
-# return a reference to this session and the user data
-               
+# return a reference to this session and the user data hashes
                 return ($user_data,\%session);
             } # password matched
             else { 
@@ -449,16 +426,6 @@ EOF
     } # we got a user name
 }
 
-sub make_password { 
-    my ($user_id,$pass_given,$dbh) = @_;
-    my ($s,$p,@t);
-    # make random salt
-    @t=('a'..'z',0..9);
-    $s .= $t[(rand $#t)] for (0..5);
-    $p=sha256_hex($pass_given, "{$s}");
-    my $sth=$dbh->prepare("update users set password = ? where (id=?)");
-    return $sth->execute("${s}:${p}", $user_id); 
-}
 
 sub make_footer {
     my ( $actions_links, $functions_forms, $session_id, $role, $yamlfile) = @_;
@@ -545,9 +512,10 @@ sub public_reader {
 # render the blog entries
     else {
     my @yaml_files ;
+
 # populate the session with dir listing, if not there 
     if (! $session{dirlist}){
-        print "announce: ", $announce_yaml if $debug;
+        print "PUBLIC READER populating session with dirlist" if $debug;
         opendir  D, $yaml_path or die $!; 
         @yaml_files =  grep (! /^\.{1,2}$/, sort (readdir D));
  @yaml_files = map {grep (! /^$announce_yaml$/, $_)} @yaml_files;
@@ -592,5 +560,28 @@ EOF
 
 
 
+sub make_password { 
+    my ($user_id,$pass_given,$dbh) = @_;
+    my ($s,$p,@t);
+    # make random salt
+    @t=('a'..'z',0..9);
+    $s .= $t[(rand $#t)] for (0..5);
+    $p=sha256_hex($pass_given, "{$s}");
+    my $sth=$dbh->prepare("update users set password = ? where (id=?)");
+    return $sth->execute("${s}:${p}", $user_id); 
+}
+
+
+sub error {
+my ($session_id, $errorstring) = @_;
+    $footer = make_footer([],[], $session_id);
+    my $spacer = '&nbsp;' x 100;
+    print <<"EOF";
+$header
+<p>$spacer</p>
+<p>$errorstring</p>
+$footer
+EOF
+}
 
 # vim: paste:ai:ts=4:sw=4:sts=4:expandtab:ft=perl
