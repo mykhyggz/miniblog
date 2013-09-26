@@ -13,7 +13,7 @@ use Data::UUID;
 
 my $r = shift;
 my $cgi = CGI->new( $r );
-my $args = $cgi->Vars;
+local our $args = $cgi->Vars;
 
 our $debug = 1;
 
@@ -21,28 +21,18 @@ our $limit = 2;
 our $default_actions = {Admin=>['Logout','Articles'], User=>['Logout'], 'Guest'=>['Login'] };
 our $default_functions = {Admin=>['Add'], User=>[] };
 
-our $public_actions={};
-our $public_functions={};
-
+# TO DO: Get from admin-created config yaml
+our $title = "Apache::MiniBlog The Lightweight, fast Weblog";
 our $announce_yaml = "announce.yml";
-
-# Actions: Single things like login/out, preview, publish, etc. GET links
-# Login Logout
 our $actions_header = "Actions";
-
-# Functions: things that may have actions associated, like new, edit, etc. POST 
 our $functions_header = "Functions";
-
-our $footer = '';
-
 our $myurl='/cgi-perl/miniblog.pl';
 our $storage_path = '/var/www/localhost/perl/storage';
 our $yaml_path = '/var/www/localhost/htdocs/blogfiles';
-# our $session_id = '';
 
 our $header = <<"EOF";
 <!DOCTYPE html>
-<html><head><title>Apache::MiniBlog The Lightweight, fast Weblog </title>
+<html><head><title>$title</title>
 <link href="/css/miniblog_layout.css" rel="stylesheet" type="text/css"><meta charset="UTF-8">
 <link href="/css/miniblog_styles.css" rel="stylesheet" type="text/css"><meta charset="UTF-8">
 <style type="text/css"></style>
@@ -55,6 +45,8 @@ our $public_error = <<"EOF";
 <p>Hmm... there should have been something... but here comes the homepage ;-/</p>
 </body></html>
 EOF
+
+our $footer = '';
 
 $r->content_type('text/html');
 
@@ -202,9 +194,8 @@ elsif ($method eq 'POST') {
 # cascade of 'POST' actions 
 #ADD
             if ($action eq 'Add'){ 
-            # $actions_links, $functions_forms, $session_id, $role, $yamlfile
-                $footer = make_footer(['Logout'],[],$session_id,$role);
-                #($session_id,$username,$yamldata,$yamlfile)
+   
+                $footer = make_footer(['Logout'],[],$session_id,$role); 
                 my $form = load_edit_form($session_id,$user_data->{username});
                 print <<"EOF";
 $header
@@ -214,13 +205,12 @@ EOF
             }
 #EDIT
             elsif ($action eq 'Edit'){ 
-        # my $page_to_edit = 'somefile.yml'; <input type="hidden" name="yamlfile" value="$page_to_edit"> 
-                my $yamlfile = ( $args->{'yamlfile'} or $session{last_yaml});
-                my $post = LoadFile("$yaml_path/$yamlfile"); 
+    
+                my $yamlfile = ( $args->{'yamlfile'} );#or $session{last_yaml});
+                my $post = LoadFile("$yaml_path/$yamlfile");
 
-                # ($session_id,$username,$yamldata,$yamlfile)
                 my $form = load_edit_form($session_id,$user_data->{username},$post,$yamlfile);
-            # $actions_links, $functions_forms, $session_id, $role, $yamlfile
+
                 $footer = make_footer(['Logout'],[],$session_id,$role,$yamlfile);
 
                 print <<"EOF";
@@ -251,13 +241,11 @@ EOF
                     $yaml_file .= '.yml';        
                 }
 # passed to Default view
-        $session{last_yaml}=$yaml_file;
-# TO DO:
-# hmm. this gets used if no session is passed, but is never re-set
-# may be just a Bad Idea to use at all :( TO DO:
-#        $session{offset} = map{ grep /^$yaml_file$/, $_->[0]} @{$session{dirlist}};
+        $session{last_yaml}=$yaml_file; 
+
                 DumpFile("$yaml_path/$yaml_file", $post) or die $!;
-        $session{dirlist} = get_posts;
+# re-read the directory list, last edit is now first
+        $session{dirlist} = get_posts();
         print <<"EOF"; 
 <html><head> <meta http-equiv="refresh" content="2; url=${myurl}?session_id=$session_id&amp;action=Default"></head><body>
 <p> Saved $yaml_file... redirecting</p>
@@ -503,8 +491,7 @@ sub public_reader {
             @yaml_files = @{$session{dirlist}};
         }
 
-# grab the offset from the nav click or the session, or make it up
-    # my $offset = ( $args->{offset} ? $args->{offset} : $session{offset} ); 
+# grab the offset from the nav click or the session, or make it up 
     my $offset = ( $args->{offset} || 0 );
 
     my $target = $offset + ( $limit - 1 ) ;
