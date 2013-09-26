@@ -14,10 +14,12 @@ use Data::UUID;
 my $r = shift;
 my $cgi = CGI->new( $r );
 my $args = $cgi->Vars;
+
 our $debug = 1;
+
 our $limit = 2;
 our $default_actions = {Admin=>['Logout','Articles'], User=>['Logout'], 'Guest'=>['Login'] };
-our $default_functions = {Admin=>['Add', 'Edit'], User=>['Comment'] };
+our $default_functions = {Admin=>['Add'], User=>[] };
 
 our $public_actions={};
 our $public_functions={};
@@ -36,7 +38,7 @@ our $footer = '';
 our $myurl='/cgi-perl/miniblog.pl';
 our $storage_path = '/var/www/localhost/perl/storage';
 our $yaml_path = '/var/www/localhost/htdocs/blogfiles';
-our $session_id = '';
+# our $session_id = '';
 
 our $header = <<"EOF";
 <!DOCTYPE html>
@@ -48,7 +50,7 @@ our $header = <<"EOF";
 EOF
 
 our $public_error = <<"EOF";
-<html><head> <meta http-equiv="refresh" content="2; url=$myurl"></head><body>
+<html><head> <meta http-equiv="refresh" content="5; url=$myurl"></head><body>
 <h2>Whoops!</h2> 
 <p>Hmm... there should have been something... but here comes the homepage ;-/</p>
 </body></html>
@@ -95,7 +97,7 @@ exit;
 
                 if ($action eq 'Logout'){ # short-circuit?
                     $session{is_logged_in}=0; 
-                  #  $session{offset}=0; #they get new session, so keep offset
+
                     print <<"EOF";
 <html><head> <meta http-equiv="refresh" content="5; url=$myurl"></head><body>
 <h2>Logged Out!</h2><p>Redirecting to Home Page</p></body></html>
@@ -115,14 +117,14 @@ EOF
 # view a new publish
                     if ($action eq 'Default'){ 
                         public_reader(undef, undef, $session_id,
-                            $user_data->{role},0,$session{last_yaml});
+                            $user_data->{role},$session{last_yaml});
                     } # action : Default   
 
 # view a list, paginated
                     elsif ($action eq 'Articles'){ 
                         # link wanted wired into reader 
                         public_reader(undef, undef, $session_id, 
-                            $user_data->{role}, 1, undef, 'Articles'); 
+                            $user_data->{role}, undef, 'Articles'); 
                     } # action:Articles
 
 # pick a single post
@@ -133,15 +135,15 @@ EOF
 # TO DO: move the role logic to the render part, or below 
                         if ($user_data->{role} eq 'Admin'){ 
                             public_reader(['Logout'], ['Edit','Comment'],
-                                $session_id, $user_data->{role},0,$yaml);
+                                $session_id, $user_data->{role},$yaml);
                         }
                         elsif($user_data->{role} eq 'User') {
                             public_reader(['Logout'], ['Comment'],
-                                $session_id, $user_data->{role},0,$yaml);
+                                $session_id, $user_data->{role},$yaml);
                         }
                         else {
                             public_reader([], [],
-                                $session_id, $user_data->{role},0,$yaml);
+                                $session_id, $user_data->{role},$yaml);
                         }
                     } # action:Pick
                 } # not logout, opened user data
@@ -200,48 +202,35 @@ elsif ($method eq 'POST') {
 # cascade of 'POST' actions 
 #ADD
             if ($action eq 'Add'){ 
-        # my $page_to_edit = 'somefile.yml'; <input type="hidden" name="yamlfile" value="$page_to_edit"> 
-        # TO DO: Turn this to load_edit_form for 'Add', 'Edit'
+            # $actions_links, $functions_forms, $session_id, $role, $yamlfile
+                $footer = make_footer(['Logout'],[],$session_id,$role);
+                #($session_id,$username,$yamldata,$yamlfile)
+                my $form = load_edit_form($session_id,$user_data->{username});
                 print <<"EOF";
 $header
-<form action="$myurl" method="post">
-Title: <input type="text" name="Title" value=""><br />
-Description: <input type="text" name="Description" value=""><br /> 
-Author: <input type="text" name="Author" value="$user_data->{username}"><br /> 
-<textarea rows="20" cols="50" name="Copy">TypeYrShitHere</textarea>
-
-<input type="hidden" name="action" value="Publish">
-<input type="hidden" name="session_id" value="$session_id">
-<input type="submit" value="Publish"></form>
+$form
 $footer
 EOF
             }
 #EDIT
             elsif ($action eq 'Edit'){ 
+        # my $page_to_edit = 'somefile.yml'; <input type="hidden" name="yamlfile" value="$page_to_edit"> 
                 my $yamlfile = ( $args->{'yamlfile'} or $session{last_yaml});
                 my $post = LoadFile("$yaml_path/$yamlfile"); 
 
-# $actions_links, $functions_forms, $session_id, $role, $yamlfile
-                $footer = make_footer(['Logout'],[],$session_id,undef,$yamlfile);
+                # ($session_id,$username,$yamldata,$yamlfile)
+                my $form = load_edit_form($session_id,$user_data->{username},$post,$yamlfile);
+            # $actions_links, $functions_forms, $session_id, $role, $yamlfile
+                $footer = make_footer(['Logout'],[],$session_id,$role,$yamlfile);
 
                 print <<"EOF";
 $header
-<form action="$myurl" method="post"> 
-Title: <input type="text" name="Title" size=70 value="$post->{title}"><br />
-Description: <textarea name="Description" rows=2 cols=80>$post->{description}</textarea><br />
-Author: <input type="text" name="Author" size=60 value="$post->{author}"><br />
-<textarea rows="20" cols="80" name="Copy">
- $post->{copy}
-</textarea><br />
-<input type="hidden" name="yamlfile" value="$yamlfile">
-<input type="hidden" name="action" value="Publish">
-<input type="hidden" name="session_id" value="$session_id">
-<input type="submit" value="Publish"></form>
+$form
 $footer
 EOF
             }
 # PUBLISH
-            elsif ($action eq 'Publish'){ 
+            elsif ($action eq 'Publish'){
                 my $datetime = time;
                 my $title =  $args->{Title};
                 my $description = $args->{Description};
@@ -250,17 +239,25 @@ EOF
                 my $post= {title =>$title, description =>$description,
                     author =>$author, copy =>$copy, datetime=>$datetime};
                 my $yaml_file ;
+# re-use file name or make a new one
                 unless ($yaml_file = $args->{yamlfile}){
 # uuid for the file name... 
                     my $ug =  new Data::UUID;
                     $yaml_file = $ug->to_string($ug->create()) . '_';
-
+# TO DO: append directory list, rather, we need to re-load 
 # append something useful to it, like the title
                     ( my $hrid = $args->{Title})=~s/[^a-zA-Z0-9]/_/g ;
                     $yaml_file .= $hrid;
                     $yaml_file .= '.yml';        
                 }
+# passed to Default view
+        $session{last_yaml}=$yaml_file;
+# TO DO:
+# hmm. this gets used if no session is passed, but is never re-set
+# may be just a Bad Idea to use at all :( TO DO:
+#        $session{offset} = map{ grep /^$yaml_file$/, $_->[0]} @{$session{dirlist}};
                 DumpFile("$yaml_path/$yaml_file", $post) or die $!;
+        $session{dirlist} = get_posts;
         print <<"EOF"; 
 <html><head> <meta http-equiv="refresh" content="2; url=${myurl}?session_id=$session_id&amp;action=Default"></head><body>
 <p> Saved $yaml_file... redirecting</p>
@@ -280,18 +277,16 @@ EOF
                 if (my ($user_data, $session) =
                     check_password ( $user, $pass,$session{dirlist} )){ 
 
-
-
-
-
 # we passed! Go to Admin/User "landing page" with a session passed back.  
                 my $session_id = $session->{_session_id};
                 my $role = $user_data->{role};
-                    if ( $role eq 'Admin'){ 
-                        public_reader(['Logout','Articles'],['Add','Edit','Users'], $session_id, $role, 0, $announce_yaml);
+
+# ( $actions_links, $functions_forms, $session_id, $role, $article, $caller)
+                    if ( $role eq 'Admin'){
+                        public_reader(['Logout','Articles'],['Add','Edit','Users'], $session_id, $role, $announce_yaml);
                     }
                     else {
-                        public_reader(['Logout','Articles'],['Add'], $session_id, $role, 0, $announce_yaml); # can edit announce article
+                        public_reader(['Logout','Articles'],['Add'], $session_id, $role, $announce_yaml); # can edit announce article
 
                     }
                 undef $session; # likely not needed
@@ -371,18 +366,18 @@ EOF
                 if ($@) { tie %session, 'Apache::Session::SQLite', undef, 
                      { DataSource => "dbi:SQLite:$storage_path/sessions.db" };
                 }
-                $session{offset}=0;
+
                 $session{is_logged_in} = 1; 
+                $session{last_yaml}=$announce_yaml;
                 my $session_id = $session{_session_id}; 
 
-# get the new list of files 
-# TO DO: Pass this from the anonymous session
-if (! $dir_list){ 
-    error($session_id, "i guess we need to list the dirs here after all?");
-}
-else {
-    $session{dirlist} = $dir_list;
-}
+                if (! $dir_list){ 
+                    error($session_id,
+                        "i guess we need to list the dirs here after all?");
+                }
+                else {
+                    $session{dirlist} = $dir_list;
+                }
                 my $sth=$dbh->prepare
                     ("update users set last_session_id = ? where (id = ?)");
                 $sth->execute($session_id, $user_id); 
@@ -444,10 +439,10 @@ sub render_post {
     my $copy = join "</p>\n<p>", (split /\r\n(?:\r\n)+/, $post->{copy}); 
     $copy = '<p>' .  $copy  . '</p>';
 
-    my $action;
-    $action='&amp;session_id=$session_id&amp;action=Pick' if
+    my $action = '';
+    $action="&amp;session_id=$session_id&amp;action=Pick" if
         (($role eq 'Admin') || ($role eq 'User'));
-    my $drill_link= "<a href=\"${myurl}?file=$yaml\">Link</a>" ;
+    my $drill_link= "<a href=\"${myurl}?file=${yaml}$action\">Link</a>" ;
 
     my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = gmtime ($post->{datetime} ); 
                 $mon += 1; $year += 1900; 
@@ -477,69 +472,64 @@ sub public_reader {
     tie %session, 'Apache::Session::SQLite', ($session_id || undef),
  { DataSource => "dbi:SQLite:$storage_path/sessions.db" }; 
 
-    $caller = '' unless ($caller);
+    $caller = '' unless $caller;
+    $role = '' unless $role;
     $session_id = $session{_session_id};
     $footer = make_footer($actions_links, $functions_forms, $session_id, $role);
     my $entries = '';
     my $more_needed = '' ;
-
-    if ($article){
-#        print "rendering an article: ", $article if $debug;
-#        print "last yaml: ", $session{last_yaml} if $debug;
+# print "offset: ", $session{offset} if $debug;
+    if ($article){ 
         $session{last_yaml}=$article;
-        $session{offset} = map{ grep /^$article$/, $_->[0]} @{$session{dirlist}};
-        print "offset: ", $session{offset} if $debug;
-        $entries = render_post([$article,LoadFile("$yaml_path/$article")], $session_id);
+# so this gets set when an article is read
+# this would mean nothing, really
+#        $session{offset} = map{ grep /^$article$/, $_->[0]} @{$session{dirlist}};
+
+        $entries = render_post([$article,LoadFile("$yaml_path/$article")], $session_id,$role);
  
     }
 
 # render the blog entries
     else {
-    my @yaml_files ;
+        my @yaml_files ;
 
 # populate the session with dir listing, if not there 
-    if (! $session{dirlist}){
-        print "PUBLIC READER populating session with dirlist" if $debug; 
+        if (! $session{dirlist}){
+            my $yamlfiles = get_posts(); 
+            $session{dirlist} = $yamlfiles;
+            @yaml_files = @{$yamlfiles};
+        }
+        else {
+            @yaml_files = @{$session{dirlist}};
+        }
 
-        opendir  D, $yaml_path or die $!; 
-        @yaml_files =  grep (! /^\.{1,2}$/, readdir D);
- @yaml_files = map{ [$_, LoadFile("$yaml_path/$_")->{datetime} ]} grep (! /^$announce_yaml$/, @yaml_files);
+# grab the offset from the nav click or the session, or make it up
+    # my $offset = ( $args->{offset} ? $args->{offset} : $session{offset} ); 
+    my $offset = ( $args->{offset} || 0 );
 
-# change session dirlist to loadfile from /tmp
-# dump it to /tmp, update only on add or edit?
-
-        $session{dirlist} = [@yaml_files];
-    }
-    else {
-        @yaml_files = @{$session{dirlist}};
-    }
-
-        print "offset pre: ", $session{offset} if $debug;
-    my $offset = ( (defined $session{offset}) ? $session{offset} : 0 ); 
-
-    # offset. Target is limit - 1, we display 2 if the target is 2, so, 0..1 
     my $target = $offset + ( $limit - 1 ) ;
     my $files_index = $#yaml_files;
-# "offset" also makes the nav back button/key work, fwiw
-    $caller =  "&amp;action=$caller" if $caller;
-    $more_needed = "<a href=\"$myurl?session_id=${session_id}${caller}&amp;offset=$offset\">more</a>";
-    # target is the array index. Must be inside the limit
 
-    if ($target > $files_index){
-        $target = $files_index;
-    # set to repeat?
-        $offset = $files_index - ( $limit - 1 );
-    $more_needed = "<h6>hey… that’s all folks!</h6>";
+    $caller =  "&amp;action=$caller" if $caller; 
+
+# fix if the target would be outside the index
+    if ($target >= $files_index){
+        $target = $files_index; 
+        $more_needed = "<h6>hey… that’s all folks!</h6>";
+    }
+    else {
+
+    # update the next offset in sequence 
+        my $off = $target + 1;
+        $more_needed = "<a href=\"$myurl?session_id=${session_id}${caller}&amp;offset=$off\">more</a>";
     }
 
-#  update the offset in the session
-    $session{offset}=$target+1 ;
-
-        print "offset post: ", $session{offset} if $debug;
 # parse a few posts
-   my @posts = map {[$_->[0],LoadFile("$yaml_path/$_->[0]")]} @yaml_files[$offset .. $target]; 
-# hack to get links 
-    $entries .= render_post($_, $session_id) for (@posts);
+    my @posts = map {[$_->[0],LoadFile("$yaml_path/$_->[0]")]} @yaml_files[$offset .. $target]; 
+
+# "offset" makes the nav back button/key work, fwiw
+
+    $entries .= render_post($_, $session_id,$role) for (@posts);
 }
 
 
@@ -548,7 +538,6 @@ $header
 $entries 
 $more_needed
 $footer
-
 EOF
 
 } # public reader
@@ -579,4 +568,40 @@ $footer
 EOF
 }
 
+sub load_edit_form {
+
+my ($session_id,$username,$yamldata,$yamlfile)=@_;
+my ($title,$description,$author,$copy) = '';
+if ($yamldata){
+$title = $yamldata->{title};
+$description =$yamldata->{description};
+$author =$yamldata->{author};
+$copy = $yamldata->{copy};
+}
+else {
+$author = $username;
+}
+return <<"EOF";
+<form action="$myurl" method="post">
+Title: <input type="text" name="Title" value="$title"><br />
+Description: <input type="text" name="Description" value="$description"><br /> 
+Author: <input type="text" name="Author" value="$author"><br /> 
+<textarea rows="20" cols="50" name="Copy">$copy</textarea>
+<input type="hidden" name="yamlfile" value="$yamlfile">
+<input type="hidden" name="action" value="Publish">
+<input type="hidden" name="session_id" value="$session_id">
+<input type="submit" value="Publish"></form>
+EOF
+
+}
+
+sub get_posts {
+
+            opendir  D, $yaml_path or die $!; 
+            my @yaml_files =  grep (! /^\.{1,2}$/, readdir D);
+            @yaml_files = sort {$b->[1] cmp $a->[1]}
+                map{ [$_, LoadFile("$yaml_path/$_")->{datetime} ]}
+                grep (! /^$announce_yaml$/, @yaml_files);
+return [@yaml_files];
+}
 # vim: paste:ai:ts=4:sw=4:sts=4:expandtab:ft=perl
