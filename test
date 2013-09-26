@@ -1,18 +1,56 @@
 #!/usr/bin/perl
 
-use Net::SSH::Perl;
-use Test::Simple;
+# use Net::SSH::Perl;
 use HTTP::Lite;
-use Test::Simple tests=>2;
+use YAML qw/LoadFile DumpFile/;
+use Test::Simple tests=>3;
 use strict;
 use warnings;
 
-my $ssh = Net::SSH::Perl->new("evolone.org");
-$ssh->login("mykhyggz");
-my($stdout, $stderr, $exit) = $ssh->cmd("ls|head -1");
-ok( $stdout =~/^smstest\.pl$/ );
+=pod
+
+so, some notes.
+
+Setup the tables, populate with data via ssh
+keep it simple, article 01, article 02, etc.
+source config YAML for things to check
+make articles with YAML
+use /tmp for everything?
+need to make config hash first, so we can make our own for this test
+
+=cut
+
+# my $ssh = Net::SSH::Perl->new("evolone.org");
+# $ssh->login("mykhyggz");
+# my($stdout, $stderr, $exit) = $ssh->cmd("ls|head -1");
+# ok( $stdout =~/^smstest\.pl$/ );
+
 my $http = HTTP::Lite->new;
 my $req = $http->request("http://lbg2/perl/miniblog.pl");
+
+
 my $t=$http->body();
-$t =~ s/.*session_id=(.*)&amp;.*/$1/msig;
-ok ($t=~/^[a-f0-9]+$/, "got session ID");
+(my $session_id = $t) =~ s/.*session_id=(.*)&amp;.*/$1/msig;
+ok ($session_id=~/^[a-f0-9]+$/, "got session ID: $session_id");
+
+$http->prepare_post({ 
+username=>'Admin',
+session_id=>$session_id,
+password => $ENV{miniblog_pass},
+	});
+$req = $http->request("http://lbg2/perl/miniblog.pl");
+
+$t=$http->body();
+($session_id=$t) =~ s/.*session_id=(.*)&amp;.*/$1/msig;
+
+ok ($session_id =~/^[a-f0-9]+$/, "got session ID: $session_id");
+
+my $logged_in = $session_id;
+
+$req = $http->request("http://lbg2/perl/miniblog.pl?action=Articles&amp;session_id=$session_id");
+
+$t=$http->body();
+($session_id=$t) =~ s/.*session_id=(.*)&amp;.*/$1/msig;
+
+ok ($session_id eq $logged_in, "session ID: matches");
+
