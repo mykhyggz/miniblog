@@ -418,8 +418,7 @@ return $footer;
 }
 
 sub render_post {
-    # if a single post is wanted, called once, or in a loop for a page of posts
-    # 'link_wanted' should always be a permalink, actually
+    # if a single post is wanted, called once, or in a loop for a page of posts 
     my ( $yamlfile, $session_id, $role ) = @_;
     my $yaml = $yamlfile->[0];
     my $post = $yamlfile->[1];
@@ -463,7 +462,7 @@ sub public_reader {
     $caller = '' unless $caller;
     $role = '' unless $role;
     $session_id = $session{_session_id};
-    $footer = make_footer($actions_links, $functions_forms, $session_id, $role);
+    $footer = make_footer($actions_links, $functions_forms, $session_id, $role,$article);
     my $entries = '';
     my $more_needed = '' ;
 # print "offset: ", $session{offset} if $debug;

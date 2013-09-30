@@ -1,36 +1,180 @@
 #!/usr/bin/perl
+use Test::More; # tests=>1;
 
-# use Net::SSH::Perl;
-use HTTP::Lite;
-use YAML qw/LoadFile DumpFile/;
-use Test::Simple tests=>3;
+BEGIN {
+use_ok( 'Net::SSH2' );
+use_ok( 'HTTP::Lite' );
+use_ok( 'YAML' );
+use_ok( 'Fcntl' );
+}
+
 use strict;
 use warnings;
 
+my $config = YAML::LoadFile('testconf.yml');
+my ( $uid, $gid ) = undef; # will get these for "web_user" from remote system
+# print join "\n", keys %$config;
+
+my $ret = undef; # sink for channel data coming back
+
+my $ssh = Net::SSH2->new();
+
 =pod
 
-so, some notes.
+Will need:
+working virtual host with modperl alias
 
-Setup the tables, populate with data via ssh
-keep it simple, article 01, article 02, etc.
-source config YAML for things to check
-make articles with YAML
-use /tmp for everything?
-need to make config hash first, so we can make our own for this test
+will create:
+users_db_name.db
+yaml file
+configuration yaml
+
+edit, then do perl saveconf.pl
 
 =cut
 
-# my $ssh = Net::SSH::Perl->new("evolone.org");
-# $ssh->login("mykhyggz");
-# my($stdout, $stderr, $exit) = $ssh->cmd("ls|head -1");
-# ok( $stdout =~/^smstest\.pl$/ );
+$ssh->connect($config->{ssh_host}) or die $!;
+
+if ($ssh->auth_publickey($config->{ssh_user},"$config->{pub_key}","$config->{priv_key}")){
+
+    my $chan = $ssh->channel();
+
+    my $sftp = $ssh->sftp();
+
+# get the files from github
+    unless ($sftp->stat("/tmp/miniblog")){
+
+        $chan->exec("git clone git://github.com/mykhyggz/miniblog.git /tmp/miniblog"); 
+
+        while (! $chan->eof()){ $chan->read($ret,16); print $ret; } 
+        $chan->close; 
+    }
+
+# get webuser uid
+
+    $chan = $ssh->channel();
+    $chan->exec("id -u $config->{http_user}"); 
+    while (! $chan->eof()){ $chan->read($ret,16); $uid .= $ret; } 
+    chomp $uid;
+    $chan->close; 
+    $ret = undef;
+
+# get webuser gid
+
+    $chan = $ssh->channel();
+    $chan->exec("id -g $config->{http_user}"); 
+    while (! $chan->eof()){ $chan->read($ret,16); $gid .= $ret; } 
+    chomp $gid;
+    $chan->close; 
+    $ret = undef;
+
+    die "no uid/gid gotten" unless ((defined $uid) && (defined $gid));
+
+print "user:$uid:group:$gid:"; 
+
+# check / make  folders
+# TO DO: This isn't strictly right, as the folder could be owned by another ID
+    my $docroot = $sftp->stat($config->{doc_root});
+        warn $sftp->error(), ' doc_root: ', $! if $sftp->error();
+
+ok ((($docroot->{gid} eq 0) && ($docroot->{uid} eq 0)), "docroot owners okay");
+
+ok (((sprintf( "%04o", $docroot->{mode} & 07777)) eq '0755'), "mode okay");
+
+    my $apppath = $sftp->stat($config->{app_path});
+        warn $sftp->error(), ' app_path: ', $! if $sftp->error();
+
+ok ((($apppath->{gid} eq 0) && ($apppath->{uid} eq 0)), "apppath owners okay");
+
+ok (((sprintf( "%04o", $apppath->{mode} & 07777)) eq '0755'), "mode okay");
+
+    my $dbpath_info = $sftp->stat($config->{db_path});
+        warn $sftp->error(), " db_path: ", $! if $sftp->error();
+
+# folder doesn't exist
+    if ($sftp->error() eq 2 ){
+        $sftp->mkdir($config->{db_path}, 0744);
+
+        warn $sftp->error(), " can't make db_path: ", $! if $sftp->error();
+    }
+
+print "creating $config->{db_path}/$config->{db_name}";
+    my $usersdb = $sftp->open(
+        "$config->{db_path}/$config->{db_name}", O_CREAT,0644); 
+        warn $sftp->error(), " : ", $! if $sftp->error();
+
+# set up user table
+    $ssh->scp_put("schema.sql", "/tmp/schema.sql");
+
+
+    $chan = $ssh->channel();
+    $chan->shell();
+    print $chan "sqlite3 \"$config->{db_path}/$config->{db_name}\" </tmp/schema.sql";
+    print $_ while <$chan>; 
+    $chan->close; 
+
+# fix perms to webuser
+	$usersdb->setstat(uid=>$uid, gid=>$gid);
+
+	$sftp->setstat("$config->{db_path}", uid=>$uid, gid=>$gid); 
+
+	warn $sftp->error(), " : ", $! if $sftp->error();
+	$dbpath_info = $sftp->stat($config->{db_path});
+
+ok (($dbpath_info->{uid} eq $uid)&&($dbpath_info->{gid} eq $gid),
+    "user and group is set on dbpath");
+
+    $sftp->mkdir("$config->{doc_root}/$config->{css_url}"); 
+        warn $sftp->error(), " css_url: ", $! if $sftp->error();
+
+    $sftp->mkdir("$config->{yaml_path}"); 
+        warn $sftp->error(), " yaml_path : ", $! if $sftp->error();
+
+# make admin page
+	YAML::DumpFile("/tmp/$config->{admin_page}",{
+			author=>'Admin',
+			copy=>'test admin page',
+			datetime=>'1380225721',
+			description=>'Admin Test Page',
+			title=>'Admin Test Page',
+		}) or die $!;
+
+    $ssh->scp_put("/tmp/$config->{admin_page}",
+        "$config->{yaml_path}/$config->{admin_page}");
+
+	warn $ssh->error(), " : ", $! if $ssh->error();
+
+# fix yaml owner to web user
+	$sftp->setstat("$config->{yaml_path}/$config->{admin_page}",
+		uid=>$uid, gid=>$gid); 
+
+	$sftp->setstat("$config->{yaml_path}", uid=>$uid, gid=>$gid); 
+
+# put files in place 
+
+    $chan = $ssh->channel();
+    $chan->shell();
+
+    print $chan "cp /tmp/miniblog/*.css \"$config->{doc_root}/$config->{css_url}\"";
+
+    print $chan "cp /tmp/miniblog/miniblog.pl \"$config->{app_path}\"";
+
+    $chan->close; 
+
+}
+
+$ssh->disconnect();
+
+done_testing();
+
+exit;
 
 my $http = HTTP::Lite->new;
 my $req = $http->request("http://lbg2/perl/miniblog.pl");
 
 
-my $t=$http->body();
-(my $session_id = $t) =~ s/.*session_id=(.*)&amp;.*/$1/msig;
+my $ret=$http->body();
+(my $session_id = $ret) =~ s/.*session_id=(.*)&amp;.*/$1/msig;
 ok ($session_id=~/^[a-f0-9]+$/, "got session ID: $session_id");
 
 $http->prepare_post({ 
@@ -40,8 +184,8 @@ password => $ENV{miniblog_pass},
 	});
 $req = $http->request("http://lbg2/perl/miniblog.pl");
 
-$t=$http->body();
-($session_id=$t) =~ s/.*session_id=(.*)&amp;.*/$1/msig;
+$ret=$http->body();
+($session_id=$ret) =~ s/.*session_id=(.*)&amp;.*/$1/msig;
 
 ok ($session_id =~/^[a-f0-9]+$/, "got session ID: $session_id");
 
@@ -49,8 +193,9 @@ my $logged_in = $session_id;
 
 $req = $http->request("http://lbg2/perl/miniblog.pl?action=Articles&amp;session_id=$session_id");
 
-$t=$http->body();
-($session_id=$t) =~ s/.*session_id=(.*)&amp;.*/$1/msig;
+$ret=$http->body();
+($session_id=$ret) =~ s/.*session_id=(.*)&amp;.*/$1/msig;
 
 ok ($session_id eq $logged_in, "session ID: matches");
 
+vim: paste:ai:ts=4:sw=4:sts=4:expandtab:ft=perl
