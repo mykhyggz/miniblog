@@ -10,19 +10,58 @@ use_ok( 'YAML' );
 use strict;
 use warnings;
 
-my $cfg = YAML::LoadFile($ARGV[0]);
-
+my $cfg = YAML::LoadFile($ARGV[0]); 
 # TO DO: change to use this object ^^^
 
+my $session_id ; # changes 
+
 my $http = HTTP::Lite->new;
-my $req = $http->request("http://lbg2/perl/miniblog.pl");
+my $req = $http->request($url);
+if ($req == 200){
+my $p = HTML::TokeParser::Simple->new(\$http->body());
 
-my ($session_id, $ret) = ''; # things to re-use
+TOP:
+while (my $t = $p->get_token){
+    if ($t->is_tag('a')){
+        if (my $h = $t->get_attr('href')){
+                $h = (split /\?/, $h)[1];
+                if ( ($session_id = $h)
+                    =~ s/.*session_id=([a-f0-9]+)&.*/$1/){
+ok ($session_id, "got session_id: $session_id");
+                last TOP;
+            }
 
-$ret=$http->body();
+        }
+    }
+}
+
+}
+
+# get logged in
+$http->reset();
+
+# my $http = HTTP::Lite->new;
+$http->prepare_post({ 
+    username=>'Admin',
+    session_id=>$session_id,
+    password => $ENV{miniblog_pass},
+	});
 
 
-my $p = HTML::TokeParser::Simple->new(\$ret);
+$req = $http->request($url);
+
+
+if ($req == 200){
+my $p = HTML::TokeParser::Simple->new(\$http->body());
+
+# should be landing page plus 'add' action form
+
+# while (my $t = $p->get_token){
+# print $t->as_is;
+# }
+# 
+# 
+# exit;
 
 TOP:
 while (my $t = $p->get_token){
@@ -39,29 +78,56 @@ last TOP;
 }
 
 
-$http->prepare_post({ 
-username=>'Admin',
-session_id=>$session_id,
-password => $ENV{miniblog_pass},
-	});
-$req = $http->request("http://lbg2/perl/miniblog.pl");
-
-$ret=$http->body();
-($session_id=$ret) =~ s/.*session_id=(.*)&amp;.*/$1/msig;
-
-ok ($session_id =~/^[a-f0-9]+$/, "got session ID: $session_id");
-
+}
+print  "session id: ", $session_id, "\n";
 # check content of admin page?
+
+# make some content, now we're logged in
+
+$http->reset();
+
+for (1 .. 6){
+    my $it = sprintf "%02d", $_ ;
+    my $dt = ( 1380225721 - $_ );
+    $http->prepare_post({
+        session_id => $session_id,
+        Author => 'Admin',
+        Copy => "$it Tests. Are started!",
+        Description => "Test Page $it",
+        Title => "Test Title $it",
+        action=>"Publish",
+    });
+
+    $req = $http->request($url);
+
+    if ($req == 200){
+        my $ret=$http->body();
+
+        # grab yaml files for deletion later
+        print $http->status_message(), "\n";
+        # each time should re-set last viewed and return 'default' of last viewed
+        # dump page
+        my $p = HTML::TokeParser::Simple->new(\$ret);
+        while (my $t = $p->get_token){
+            print $t->as_is;
+        }
+    # sleep 1;
+    }
+}
+
 
 my $logged_in = $session_id;
 
-$req = $http->request("http://lbg2/perl/miniblog.pl?action=Articles&amp;session_id=$session_id");
+$req = $http->request("${url}?action=Articles&amp;session_id=$session_id");
 
-$ret=$http->body();
+if ($req == 200){
+my $ret=$http->body();
 ($session_id=$ret) =~ s/.*session_id=(.*)&amp;.*/$1/msig;
 
-ok ($session_id eq $logged_in, "session ID: matches");
+#check pagination
 
+ok ($session_id eq $logged_in, "session ID: matches");
+}
 done_testing();
 
 # vim: paste:ai:ts=4:sw=4:sts=4:expandtab:ft=perl

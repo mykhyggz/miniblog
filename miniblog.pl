@@ -589,7 +589,7 @@ EOF
 sub get_posts {
 
             opendir  D, $yaml_path or die $!; 
-            my @yaml_files =  grep (! /^\.{1,2}$/, readdir D);
+            my @yaml_files =  grep (/^.*\.yml$/, readdir D);
             @yaml_files = sort {$b->[1] cmp $a->[1]}
                 map{ [$_, LoadFile("$yaml_path/$_")->{datetime} ]}
                 grep (! /^$announce_yaml$/, @yaml_files);
