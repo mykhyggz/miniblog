@@ -3,19 +3,41 @@ use Test::More; # tests=>1;
 
 BEGIN {
 use_ok( 'HTTP::Lite' );
-
+use_ok( 'HTML::TokeParser::Simple');
+use_ok( 'YAML' );
 }
 
 use strict;
 use warnings;
 
+my $cfg = YAML::LoadFile($ARGV[0]);
+
+# TO DO: change to use this object ^^^
+
 my $http = HTTP::Lite->new;
 my $req = $http->request("http://lbg2/perl/miniblog.pl");
 
+my ($session_id, $ret) = ''; # things to re-use
 
 $ret=$http->body();
-(my $session_id = $ret) =~ s/.*session_id=(.*)&amp;.*/$1/msig;
-ok ($session_id=~/^[a-f0-9]+$/, "got session ID: $session_id");
+
+
+my $p = HTML::TokeParser::Simple->new(\$ret);
+
+TOP:
+while (my $t = $p->get_token){
+    if ($t->is_tag('a')){
+        if (my $h = $t->get_attr('href')){
+                $h = (split /\?/, $h)[1];
+                if ( ($session_id = $h) =~ s/.*session_id=([a-f0-9]+)&.*/$1/){
+ok ($session_id, "got session_id: $session_id");
+last TOP;
+            }
+
+        }
+    }
+}
+
 
 $http->prepare_post({ 
 username=>'Admin',
@@ -29,6 +51,8 @@ $ret=$http->body();
 
 ok ($session_id =~/^[a-f0-9]+$/, "got session ID: $session_id");
 
+# check content of admin page?
+
 my $logged_in = $session_id;
 
 $req = $http->request("http://lbg2/perl/miniblog.pl?action=Articles&amp;session_id=$session_id");
@@ -38,4 +62,7 @@ $ret=$http->body();
 
 ok ($session_id eq $logged_in, "session ID: matches");
 
+done_testing();
+
 # vim: paste:ai:ts=4:sw=4:sts=4:expandtab:ft=perl
+

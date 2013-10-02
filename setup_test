@@ -26,15 +26,16 @@ working virtual host with modperl alias
 
 will create:
 users_db_name.db
-yaml file
-configuration yaml
+initial Admin page yaml file
+site configuration yaml
 
-edit, then do perl saveconf.pl
+edit to your liking, then run, "saveconf.pl" to configure this setup script
 
 =cut
 
 $ssh->connect($config->{ssh_host}) or die $!;
 
+# if you don't have publickey access, you'll have to change this whole bit 
 if ($ssh->auth_publickey($config->{ssh_user},"$config->{pub_key}","$config->{priv_key}")){
 
     my $chan = $ssh->channel();
@@ -42,6 +43,7 @@ if ($ssh->auth_publickey($config->{ssh_user},"$config->{pub_key}","$config->{pri
     my $sftp = $ssh->sftp();
 
 # get the files from github
+# only runs if /tmp doesn't contain the files
     unless ($sftp->stat("/tmp/miniblog")){
 
         $chan->exec("git clone git://github.com/mykhyggz/miniblog.git /tmp/miniblog"); 
@@ -70,10 +72,10 @@ if ($ssh->auth_publickey($config->{ssh_user},"$config->{pub_key}","$config->{pri
 
     die "no uid/gid gotten" unless ((defined $uid) && (defined $gid));
 
-print "user:$uid:group:$gid:"; 
+print "webserver user:$uid group:$gid "; 
 
 # check / make  folders
-# TO DO: This isn't strictly right, as the folder could be owned by another ID
+# TO DO: This isn't right, as the docroot folder could be owned by another ID
     my $docroot = $sftp->stat($config->{doc_root});
         warn $sftp->error(), ' doc_root: ', $! if $sftp->error();
 
@@ -98,7 +100,7 @@ ok (((sprintf( "%04o", $apppath->{mode} & 07777)) eq '0755'), "mode okay");
         warn $sftp->error(), " can't make db_path: ", $! if $sftp->error();
     }
 
-print "creating $config->{db_path}/$config->{db_name}";
+print "creating $config->{db_path}/$config->{db_name}\n";
     my $usersdb = $sftp->open(
         "$config->{db_path}/$config->{db_name}", O_CREAT,0644); 
         warn $sftp->error(), " : ", $! if $sftp->error();
@@ -106,6 +108,7 @@ print "creating $config->{db_path}/$config->{db_name}";
 # set up user table
     $ssh->scp_put("schema.sql", "/tmp/schema.sql");
 
+print "setting up initial admin user\n";
 
     $chan = $ssh->channel();
     $chan->shell();
@@ -113,7 +116,7 @@ print "creating $config->{db_path}/$config->{db_name}";
     print $_ while <$chan>; 
     $chan->close; 
 
-# fix perms to webuser
+# fix perms to webuser so it can write the file
 	$usersdb->setstat(uid=>$uid, gid=>$gid);
 
 	$sftp->setstat("$config->{db_path}", uid=>$uid, gid=>$gid); 
@@ -122,15 +125,17 @@ print "creating $config->{db_path}/$config->{db_name}";
 	$dbpath_info = $sftp->stat($config->{db_path});
 
 ok (($dbpath_info->{uid} eq $uid)&&($dbpath_info->{gid} eq $gid),
-    "user and group is set on dbpath");
+    "user and group is okay on dbpath");
 
+# making css folder and yaml post dump
     $sftp->mkdir("$config->{doc_root}/$config->{css_url}"); 
         warn $sftp->error(), " css_url: ", $! if $sftp->error();
 
     $sftp->mkdir("$config->{yaml_path}"); 
         warn $sftp->error(), " yaml_path : ", $! if $sftp->error();
 
-# make admin page
+print "setting initial admin note\n";
+
 	YAML::DumpFile("/tmp/$config->{admin_page}",{
 			author=>'Admin',
 			copy=>'test admin page',
@@ -150,6 +155,8 @@ ok (($dbpath_info->{uid} eq $uid)&&($dbpath_info->{gid} eq $gid),
 
 	$sftp->setstat("$config->{yaml_path}", uid=>$uid, gid=>$gid); 
 
+	warn $sftp->error(), " : ", $! if $sftp->error();
+
 # put files in place 
 
     $chan = $ssh->channel();
@@ -165,15 +172,18 @@ ok (($dbpath_info->{uid} eq $uid)&&($dbpath_info->{gid} eq $gid),
 
 my $siteconf = {map {$_ => $config->{$_}} grep (! /ssh_user|ssh_host|pub_key|priv_key|http_user|doc_root|app_path/, (keys %$config))};
 
-YAML::DumpFile('/tmp/siteconfig.yml',$siteconf);
+YAML::DumpFile('/tmp/siteconfig.yml',$siteconf) or die $!;
+
+print "setting site configuration yaml\n";
 
 $ssh->scp_put('/tmp/siteconfig.yml',"$config->{app_path}/siteconfig.yml");
     warn $ssh->error, ' putting siteconfig: ', $! if ($ssh->error);
-
+# should this be writeable by the web server, or just hand-edited?
+# if writeable, then we need to link to edit on the Admin landing page
 	$sftp->setstat("$config->{app_path}/siteconfig.yml",
 		uid=>$uid, gid=>$gid); 
 
-warn $sftp->error, ' putting siteconfig: ', $! if ($ssh->error);
+    warn $sftp->error, ' putting siteconfig: ', $! if ($ssh->error);
 }
 
 
