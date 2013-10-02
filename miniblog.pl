@@ -21,14 +21,19 @@ our $limit = 2;
 our $default_actions = {Admin=>['Logout','Articles'], User=>['Logout'], 'Guest'=>['Login'] };
 our $default_functions = {Admin=>['Add'], User=>[] };
 
+# open site config
+my $location = $ENV{'SCRIPT_FILENAME'};
+(my $path = $location) =~s#^(.+)/[^/]+#$1#;
+our $config = LoadFile("$path/siteconfig.yml") or die $path, " ", $!; 
+
 # TO DO: Get from admin-created config yaml
-our $title = "Apache::MiniBlog The Lightweight, fast Weblog";
-our $announce_yaml = "announce.yml";
-our $actions_header = "Actions";
-our $functions_header = "Functions";
-our $myurl='/cgi-perl/miniblog.pl';
-our $storage_path = '/var/www/localhost/perl/storage';
-our $yaml_path = '/var/www/localhost/htdocs/blogfiles';
+our $title = $config->{blog_name};
+our $announce_yaml = $config->{admin_page}; 
+our $actions_header = $config->{action_hdr};
+our $functions_header = $config->{functn_hdr}; 
+our $myurl= $ENV{'SCRIPT_NAME'};
+our $storage_path = $config->{db_path};
+our $yaml_path = $config->{yaml_path};
 
 our $header = <<"EOF";
 <!DOCTYPE html>
