@@ -10,9 +10,9 @@ use_ok( 'YAML' );
 use strict;
 use warnings;
 
-my $cfg = YAML::LoadFile($ARGV[0]); 
+my $cfg = YAML::LoadFile('testconf.yml') or die $!; 
 # TO DO: change to use this object ^^^
-
+my $url = $cfg->{base_url};
 my $session_id ; # changes 
 
 my $http = HTTP::Lite->new;
@@ -88,7 +88,6 @@ $http->reset();
 
 for (1 .. 6){
     my $it = sprintf "%02d", $_ ;
-    my $dt = ( 1380225721 - $_ );
     $http->prepare_post({
         session_id => $session_id,
         Author => 'Admin',
@@ -109,7 +108,10 @@ for (1 .. 6){
         # dump page
         my $p = HTML::TokeParser::Simple->new(\$ret);
         while (my $t = $p->get_token){
-            print $t->as_is;
+            if ($t->is_tag('p'){
+                # TO DO: Collect filenames for deletion later
+                print $t->as_is;
+            }
         }
     # sleep 1;
     }
