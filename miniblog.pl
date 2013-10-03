@@ -9,7 +9,7 @@ use Apache::Session::SQLite;
 use Digest::SHA qw/sha256_hex/;
 use YAML qw/LoadFile DumpFile Load Dump/;
 use Data::UUID;
-
+use Text::Markdown 'markdown';
 
 my $r = shift;
 my $cgi = CGI->new( $r );
@@ -17,21 +17,27 @@ local our $args = $cgi->Vars;
 
 our $debug = 1;
 
-our $limit = 2;
+
 our $default_actions = {Admin=>['Logout','Articles'], User=>['Logout'], 'Guest'=>['Login'] };
 our $default_functions = {Admin=>['Add'], User=>[] };
 
-# open site config
+
+# this may not be reliable at all under handler routine or certain m_p setups.
 my $location = $ENV{'SCRIPT_FILENAME'};
 (my $path = $location) =~s#^(.+)/[^/]+#$1#;
+
+our $myurl= $ENV{'SCRIPT_NAME'};
+
+# open site config
+# this should have a create routine if it doesn't exist
 our $config = LoadFile("$path/siteconfig.yml") or die $path, " ", $!; 
 
-# TO DO: Get from admin-created config yaml
+our $limit = $config->{post_limit};
 our $title = $config->{blog_name};
 our $announce_yaml = $config->{admin_page}; 
 our $actions_header = $config->{action_hdr};
 our $functions_header = $config->{functn_hdr}; 
-our $myurl= $ENV{'SCRIPT_NAME'};
+
 our $storage_path = $config->{db_path};
 our $yaml_path = $config->{yaml_path};
 
@@ -428,9 +434,9 @@ sub render_post {
     my $yaml = $yamlfile->[0];
     my $post = $yamlfile->[1];
     $session_id = '' unless $session_id; # no undef warnings below
-    my $copy = join "</p>\n<p>", (split /\r\n(?:\r\n)+/, $post->{copy}); 
-    $copy = '<p>' .  $copy  . '</p>';
-
+    # my $copy = join "</p>\n<p>", (split /\r\n(?:\r\n)+/, $post->{copy}); 
+    # $copy = '<p>' .  $copy  . '</p>';
+    my $copy = markdown($post->{copy});
     my $action = '';
     $action="&amp;session_id=$session_id&amp;action=Pick" if
         (($role eq 'Admin') || ($role eq 'User'));
