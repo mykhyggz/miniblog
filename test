@@ -11,57 +11,64 @@ use strict;
 use warnings;
 
 my $cfg = YAML::LoadFile('testconf.yml') or die $!; 
-# TO DO: change to use this object ^^^
+
 my $url = $cfg->{base_url};
 my $session_id ; # changes 
 
 my $http = HTTP::Lite->new;
 my $req = $http->request($url);
 if ($req == 200){
-my $p = HTML::TokeParser::Simple->new(\$http->body());
+    my $p = HTML::TokeParser::Simple->new(\$http->body());
 
 TOP:
-while (my $t = $p->get_token){
-    if ($t->is_tag('a')){
-        if (my $h = $t->get_attr('href')){
-                $h = (split /\?/, $h)[1];
-                if ( ($session_id = $h)
-                    =~ s/.*session_id=([a-f0-9]+)&.*/$1/){
-ok ($session_id, "got session_id: $session_id");
-                last TOP;
-            }
+    while (my $t = $p->get_token){
+        if ($t->is_tag('a')){
+            if (my $h = $t->get_attr('href')){
+                    $h = (split /\?/, $h)[1];
+                    if ( ($session_id = $h)
+                        =~ s/.*session_id=([a-f0-9]+)&.*/$1/){
+    ok ($session_id, "got session_id: $session_id");
+                    last TOP;
+                }
 
+            }
         }
     }
 }
 
-}
+else {die $req, $!;}
 
-# get logged in
 $http->reset();
 
-# my $http = HTTP::Lite->new;
+# set up password, then get logged in
+
 $http->prepare_post({ 
     username=>'Admin',
     session_id=>$session_id,
     password => $ENV{miniblog_pass},
 	});
 
+$req = $http->request($url);
+# set up admin password
+
+
+if ($req == 200){ 
+        my $ret=$http->body(); 
+
+        my $p = HTML::TokeParser::Simple->new(\$ret);
+ok($ret =~ /^.*>Congrats! Admin has a password! Redirecting to login\.{3}<.+$/, "admin password set");
+}
+
+else {die $req, $!;}
+
+# login again 
+# should keep post data?
 
 $req = $http->request($url);
-
 
 if ($req == 200){
 my $p = HTML::TokeParser::Simple->new(\$http->body());
 
-# should be landing page plus 'add' action form
-
-# while (my $t = $p->get_token){
-# print $t->as_is;
-# }
-# 
-# 
-# exit;
 
 TOP:
 while (my $t = $p->get_token){
@@ -103,33 +110,22 @@ for (1 .. 6){
         my $ret=$http->body();
 
         # grab yaml files for deletion later
-        print $http->status_message(), "\n";
+#        print $http->status_message(), "\n";
         # each time should re-set last viewed and return 'default' of last viewed
         # dump page
         my $p = HTML::TokeParser::Simple->new(\$ret);
         while (my $t = $p->get_token){
-            if ($t->is_tag('p'){
+#            if ($t->is_tag('p')){
                 # TO DO: Collect filenames for deletion later
                 print $t->as_is;
-            }
+#            }
         }
     # sleep 1;
     }
 }
 
 
-my $logged_in = $session_id;
 
-$req = $http->request("${url}?action=Articles&amp;session_id=$session_id");
-
-if ($req == 200){
-my $ret=$http->body();
-($session_id=$ret) =~ s/.*session_id=(.*)&amp;.*/$1/msig;
-
-#check pagination
-
-ok ($session_id eq $logged_in, "session ID: matches");
-}
 done_testing();
 
 # vim: paste:ai:ts=4:sw=4:sts=4:expandtab:ft=perl
