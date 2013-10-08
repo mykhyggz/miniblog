@@ -307,6 +307,7 @@ EOF
      ################### SUBS ####################
 
 sub check_password {
+    # we get the dir_list from initial view, so s/b up-to-date
     my ($user_name, $pass_given,$dir_list) = @_;
     if ($user_name){
         my $dbh = DBI->connect("dbi:SQLite:$storage_path/users.db","","", { sqlite_use_immediate_transaction => 1, RaiseError => 1, AutoCommit => 1  });
@@ -319,6 +320,7 @@ sub check_password {
 # we get the last session when logging in, in theory, always the same
 # when the sessions.db wants to be gone, filter on last session id
 # in the users.db
+# TO DO: predictible session id c/b bad. Reset to new one
 
         my $session_id = $user_data->{ last_session_id }; 
         my $hash_returned = $user_data->{password};
@@ -328,13 +330,15 @@ sub check_password {
 # user has no password stored, get one in there
 # first Admin login, or temporary password request for new user with password
 
-            if (! $pass_given){ # post a password 
+            if (! $pass_given){ 
+                # TO DO: rip this out, or use it
                 $footer = make_footer([], []);
                 print <<"EOF";
 $header
 <p>$user_name, you have an empty password. This will not do.</p>
 <form action="$myurl" method="post">
 Password: <input type="password" name="password"> 
+Again, then Password: <input type="password" name="password-match"> 
 <input type="hidden" name="username" value="$user_id">
 <input type="submit" value="Set Password"></form>
 $footer
@@ -360,6 +364,7 @@ EOF
             if ($sha_hash eq $hash_tomatch){
 
 # DB entry matched against calculated hash, so authenticated
+                # TO DO: fix the hardcoded sessions db
                 my %session;
                 eval { tie %session, 'Apache::Session::SQLite', $session_id, 
                      { DataSource => "dbi:SQLite:$storage_path/sessions.db" };
@@ -377,6 +382,7 @@ EOF
                         "i guess we need to list the dirs here after all?");
                 }
                 else {
+                    # we populate with new dirlisting here on login
                     $session{dirlist} = $dir_list;
                 }
                 my $sth=$dbh->prepare
