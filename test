@@ -13,10 +13,11 @@ use warnings;
 my $cfg = YAML::LoadFile('testconf.yml') or die $!; 
 
 my $url = $cfg->{base_url};
-my $session_id ; # changes 
+my $session_id; 
 
 my $http = HTTP::Lite->new;
 my $req = $http->request($url);
+
 if ($req == 200){
     my $p = HTML::TokeParser::Simple->new(\$http->body());
 
@@ -49,9 +50,9 @@ $http->prepare_post({
 	});
 
 $req = $http->request($url);
+
 # set up admin password
-
-
+sub nothingness {
 if ($req == 200){ 
         my $ret=$http->body(); 
 
@@ -62,9 +63,11 @@ ok($ret =~ /^.*>Congrats! Admin has a password! Redirecting to login\.{3}<.+$/, 
 else {die $req, $!;}
 
 # login again 
-# should keep post data?
+# no 'reset' on http object should keep post data?
 
 $req = $http->request($url);
+}
+
 
 if ($req == 200){
 my $p = HTML::TokeParser::Simple->new(\$http->body());
@@ -91,6 +94,7 @@ print  "session id: ", $session_id, "\n";
 
 # make some content, now we're logged in
 
+sub notthiseither {
 $http->reset();
 
 for (1 .. 6){
@@ -124,7 +128,7 @@ for (1 .. 6){
     }
 }
 
-
+}
 
 done_testing();
 

@@ -10,6 +10,7 @@ use Digest::SHA qw/sha256_hex/;
 use YAML qw/LoadFile DumpFile Load Dump/;
 use Data::UUID;
 use Text::Markdown 'markdown';
+use HTML::Entities;
 
 my $r = shift;
 my $cgi = CGI->new( $r );
@@ -233,14 +234,15 @@ EOF
 # PUBLISH
             elsif ($action eq 'Publish'){
                 my $datetime = time;
-                my $title =  $args->{Title};
-                my $description = $args->{Description};
-                my $author = $args->{Author};
-                my $copy = $args->{Copy};
+                my $title =  enc($args->{Title});
+                my $description = enc($args->{Description});
+                my $author = enc($args->{Author});
+                my $copy = enc($args->{Copy});
                 my $post= {title =>$title, description =>$description,
                     author =>$author, copy =>$copy, datetime=>$datetime};
                 my $yaml_file ;
 # re-use file name or make a new one
+                # TO DO: Make sure the file exists if *re*-using the name
                 unless ($yaml_file = $args->{yamlfile}){
 # uuid for the file name... 
                     my $ug =  new Data::UUID;
@@ -466,6 +468,8 @@ sub public_reader {
     # TO DO: ^^^^^^^^^^^^^^^
     my ( $actions_links, $functions_forms, $session_id, $role, $article, $caller) = @_; 
 
+# sanitize article for ../../ crap. Should probably disallow some other stuff?
+    $article =~ s#^[\./]+##g;
     my %session; 
     tie %session, 'Apache::Session::SQLite', ($session_id || undef),
  { DataSource => "dbi:SQLite:$storage_path/sessions.db" }; 
@@ -540,6 +544,13 @@ EOF
 } # public reader
 
 
+sub enc {
+return encode_entities($_[0]); 
+}
+
+sub dec {
+return decode_entities($_[0]); 
+}
 
 sub make_password { 
     my ($user_id,$pass_given,$dbh) = @_;
@@ -566,14 +577,15 @@ EOF
 }
 
 sub load_edit_form {
-
+# TO DO: Tags
 my ($session_id,$username,$yamldata,$yamlfile)=@_;
 my ($title,$description,$author,$copy) = '';
+# all crap from wild has been enc'd, so must be dec'd 
 if ($yamldata){
-$title = $yamldata->{title};
-$description =$yamldata->{description};
-$author =$yamldata->{author};
-$copy = $yamldata->{copy};
+$title = dec($yamldata->{title});
+$description = dec($yamldata->{description});
+$author = dec($yamldata->{author});
+$copy = dec($yamldata->{copy});
 }
 else {
 $author = $username;
