@@ -11,7 +11,10 @@ use_ok( 'Fcntl' );
 use strict;
 use warnings;
 
-my $config = YAML::LoadFile('testconf.yml');
+my $config = YAML::LoadFile($ARGV[0]);
+
+die unless $config->{app_path};
+
 my ( $uid, $gid ) = undef; # will get these for "web_user" from remote system
 # print join "\n", keys %$config;
 
@@ -34,7 +37,7 @@ edit to your liking, then run, "saveconf.pl" to configure this setup script
 =cut
 
 $ssh->connect($config->{ssh_host}) or die $!;
-
+print "connecting\n\n";
 # if you don't have publickey access, you'll have to change this whole bit 
 if ($ssh->auth_publickey($config->{ssh_user},"$config->{pub_key}","$config->{priv_key}")){
 
@@ -127,12 +130,15 @@ print "setting up initial admin user\n";
 ok (($dbpath_info->{uid} eq $uid)&&($dbpath_info->{gid} eq $gid),
     "user and group is okay on dbpath");
 
-# making css folder and yaml post dump
-    $sftp->mkdir("$config->{doc_root}/$config->{css_url}"); 
+# checking/making css folder and yaml post dump
+    unless ($sftp->stat("$config->{doc_root}/$config->{css_url}")){
+        $sftp->mkdir("$config->{doc_root}/$config->{css_url}"); 
         warn $sftp->error(), " css_url: ", $! if $sftp->error();
-
-    $sftp->mkdir("$config->{yaml_path}"); 
+    }
+    unless ($sftp->stat("$config->{yaml_path}")){
+        $sftp->mkdir("$config->{yaml_path}"); 
         warn $sftp->error(), " yaml_path : ", $! if $sftp->error();
+    }
 
 print "setting initial admin note\n";
 
@@ -142,6 +148,7 @@ print "setting initial admin note\n";
 			datetime=>'1380225721',
 			description=>'Admin Test Page',
 			title=>'Admin Test Page',
+            tags=>'',
 		}) or die $!;
 
     $ssh->scp_put("/tmp/$config->{admin_page}",
@@ -152,6 +159,8 @@ print "setting initial admin note\n";
 # fix yaml owner to web user
 	$sftp->setstat("$config->{yaml_path}/$config->{admin_page}",
 		uid=>$uid, gid=>$gid); 
+
+	warn $sftp->error(), " : ", $! if $sftp->error();
 
 	$sftp->setstat("$config->{yaml_path}", uid=>$uid, gid=>$gid); 
 
@@ -169,7 +178,7 @@ print "setting initial admin note\n";
     $chan->close; 
 
 # drop config.yml in place
-
+# app_path is removed, as other data
 my $siteconf = {map {$_ => $config->{$_}} grep (! /ssh_user|ssh_host|pub_key|priv_key|http_user|doc_root|app_path/, (keys %$config))};
 
 YAML::DumpFile('/tmp/siteconfig.yml',$siteconf) or die $!;
@@ -186,6 +195,9 @@ $ssh->scp_put('/tmp/siteconfig.yml',"$config->{app_path}/siteconfig.yml");
     warn $sftp->error, ' putting siteconfig: ', $! if ($ssh->error);
 }
 
+else {
+print "whoops, there's a problem getting you logged in...\n\n";
+}
 
 $ssh->disconnect();
 

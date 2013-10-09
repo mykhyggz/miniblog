@@ -58,7 +58,7 @@ $http->prepare_post({
 $req = $http->request($url);
 
 # set up admin password 
-sub nothingness {
+
 if ($req == 200){ 
         my $ret=$http->body(); 
 
@@ -72,7 +72,7 @@ else {die $req, $!;}
 # no 'reset' on http object should keep post data?
 
 $req = $http->request($url);
-}
+
 
 
 if ($req == 200){
@@ -101,10 +101,12 @@ last TOP;
 
 # make some content, now we're logged in
 
-sub notthiseither {
-$http->reset();
+
+
+my $filesaved = '';
 
 for (1 .. 6){
+    $http->reset();
     my $it = sprintf "%02d", $_ ;
     $http->prepare_post({
         session_id => $session_id,
@@ -125,20 +127,23 @@ for (1 .. 6){
         # each time should re-set last viewed and return 'default' of last viewed
         # dump page
         my $p = HTML::TokeParser::Simple->new(\$ret);
-        while (my $t = $p->get_token){
-#            if ($t->is_tag('p')){
-                # TO DO: Collect filenames for deletion later
-                print $t->as_is;
-#            }
+
+        while (my $t = $p->get_token()){ 
+            if ($t->is_text()){
+                $filesaved = $t->as_is()if ($t->as_is() !~/^\s*$/); 
+#          print "filesaved: ", $t->as_is(), ":\n" if ($t->as_is() !~/^\s*$/); 
+            }
         }
-    # sleep 1;
+
+    sleep 1;
+            ok( ( $filesaved =~/^\s*Saved.+redirecting.*$/ms), "post made");
     }
 }
 
 # Test the pagination ends with 'that's all folks' thing
 # test that editing one page returns that page on publish
 # and that the article is at top of 'articles'
-}
+
 
 done_testing();
 

@@ -2,6 +2,13 @@
 
 use YAML 'DumpFile';
 
+my $outfile = $ARGV[0];
+
+die "provide an outfile name.yml" unless ($ARGV[0]);
+
+# set up variables 
+# for installation
+
 my $config = {
 app_path => '/var/www/london/weblog',
 db_path => '/var/www/london/weblog/storage',
@@ -22,4 +29,4 @@ pub_key =>'/home/col/.ssh/id_dsa.pub',
 priv_key =>'/home/col/.ssh/id_dsa',
 };
 
-DumpFile('testconf.yml',$config);
+DumpFile($outfile,$config);
