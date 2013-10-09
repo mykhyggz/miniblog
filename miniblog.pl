@@ -18,7 +18,6 @@ local our $args = $cgi->Vars;
 
 our $debug = 1;
 
-
 our $default_actions = {Admin=>['Logout','Articles'], User=>['Logout'], 'Guest'=>['Login'] };
 our $default_functions = {Admin=>['Add'], User=>[] };
 
@@ -42,6 +41,7 @@ our $functions_header = $config->{functn_hdr};
 our $storage_path = $config->{db_path};
 our $yaml_path = $config->{yaml_path};
 
+# TO DO: remove hardcoded css href
 our $header = <<"EOF";
 <!DOCTYPE html>
 <html><head><title>$title</title>
@@ -94,8 +94,25 @@ Password: <input type="password" name="password">
 $footer
 EOF
 exit;
-            } # action:Login  - what else 'action' from non-logged-in user?
+            } # action:Login
 
+            elsif ($action eq 'Tags') {
+                # TO DO: query for posts matching tags
+                # s/b in the session data
+                # and PUT THE TAGCLOUD in footer
+                $footer = make_footer([], [], undef);
+                print <<"EOF";
+$header
+<h3>you asked for tags</h3> 
+<form action="$myurl" method="post">
+Username: <input type="text" name="username">
+Password: <input type="password" name="password"> 
+<input type="hidden" name="session_id" value="$session_id">
+<input type="submit" value="Login"></form>
+$footer
+EOF
+exit;
+            } # action:Tags
 # we were probably, and should have been, logged in. An 'else' here?
             if ($session{is_logged_in}){
 
@@ -238,8 +255,10 @@ EOF
                 my $description = enc($args->{Description});
                 my $author = enc($args->{Author});
                 my $copy = enc($args->{Copy});
+                my $tags = enc($args->{Tags});
                 my $post= {title =>$title, description =>$description,
-                    author =>$author, copy =>$copy, datetime=>$datetime};
+                    author =>$author, copy =>$copy, datetime=>$datetime,
+                    tags => $tags,};
                 my $yaml_file ;
 # re-use file name or make a new one
                 # TO DO: Make sure the file exists if *re*-using the name
@@ -449,7 +468,10 @@ sub render_post {
     $action="&amp;session_id=$session_id&amp;action=Pick" if
         (($role eq 'Admin') || ($role eq 'User'));
     my $drill_link= "<a href=\"${myurl}?file=${yaml}$action\">Link</a>" ;
-
+my $taglinks;
+for my $tag (split /\s+/, $post->{tags}){
+$taglinks .= "<em>$tag</em>&nbsp;";
+}
     my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = gmtime ($post->{datetime} ); 
                 $mon += 1; $year += 1900; 
 # put a date on it, title, etc., from the form
@@ -462,6 +484,7 @@ sub render_post {
 <h6>$datetime</h6>
 $copy
 $drill_link
+<h6>Tags: $taglinks</h6>
 <hr /> </article>
 EOF
 }
@@ -585,15 +608,18 @@ EOF
 sub load_edit_form {
 # TO DO: Tags
 my ($session_id,$username,$yamldata,$yamlfile)=@_;
-my ($title,$description,$author,$copy) = '';
+my ($title,$description,$author,$copy,$tags) = '';
 # all crap from wild has been enc'd, so must be dec'd 
 if ($yamldata){
+# editing an existing file
 $title = dec($yamldata->{title});
 $description = dec($yamldata->{description});
 $author = dec($yamldata->{author});
 $copy = dec($yamldata->{copy});
+$tags = dec($yamldata->{tags});
 }
 else {
+# we're making an empty form for new post
 $author = $username;
 }
 return <<"EOF";
@@ -601,6 +627,7 @@ return <<"EOF";
 Title: <input type="text" name="Title" value="$title"><br />
 Description: <input type="text" name="Description" value="$description"><br /> 
 Author: <input type="text" name="Author" value="$author"><br /> 
+Tags: <input type="text" name="Tags" value="$tags"><br /> 
 <textarea rows="20" cols="50" name="Copy">$copy</textarea>
 <input type="hidden" name="yamlfile" value="$yamlfile">
 <input type="hidden" name="action" value="Publish">
