@@ -18,6 +18,7 @@ local our $args = $cgi->Vars;
 
 our $debug = 1;
 
+# is this needed?
 our $default_actions = {Admin=>['Logout','Articles'], User=>['Logout'], 'Guest'=>['Login'] };
 our $default_functions = {Admin=>['Add'], User=>[] };
 
@@ -29,7 +30,7 @@ my $location = $ENV{'SCRIPT_FILENAME'};
 our $myurl= $ENV{'SCRIPT_NAME'};
 
 # open site config
-# this should have a create routine if it doesn't exist
+# this should have a create routine or defaults if it doesn't exist?
 our $config = LoadFile("$path/siteconfig.yml") or die $path, " ", $!; 
 
 our $limit = $config->{post_limit};
@@ -41,12 +42,12 @@ our $functions_header = $config->{functn_hdr};
 our $storage_path = $config->{db_path};
 our $yaml_path = $config->{yaml_path};
 
-# TO DO: remove hardcoded css href
+
 our $header = <<"EOF";
 <!DOCTYPE html>
 <html><head><title>$title</title>
-<link href="/css/miniblog_layout.css" rel="stylesheet" type="text/css"><meta charset="UTF-8">
-<link href="/css/miniblog_styles.css" rel="stylesheet" type="text/css"><meta charset="UTF-8">
+<link href="$config->{css_url}/miniblog_layout.css" rel="stylesheet" type="text/css"><meta charset="UTF-8">
+<link href="$config->{css_url}/miniblog_styles.css" rel="stylesheet" type="text/css"><meta charset="UTF-8">
 <style type="text/css"></style>
 </head><body><div class="page-wrap"><section class="main-content">
 EOF
@@ -259,21 +260,19 @@ EOF
                 my $post= {title =>$title, description =>$description,
                     author =>$author, copy =>$copy, datetime=>$datetime,
                     tags => $tags,};
-                my $yaml_file ;
-# re-use file name or make a new one
-                # TO DO: Make sure the file exists if *re*-using the name
-                unless ($yaml_file = $args->{yamlfile}){
-# uuid for the file name... 
+                my $yaml_file = $args->{yamlfile};
+# re-use file name or make a new one 
+                unless ( ( $yaml_file ) && -e "$yaml_path/$yaml_file"){
+# uuid for the file name... plus some "hrid"
                     my $ug =  new Data::UUID;
                     $yaml_file = $ug->to_string($ug->create()) . '_';
-# TO DO: append directory list, rather, we need to re-load 
-# append something useful to it, like the title
+
                     ( my $hrid = $args->{Title})=~s/[^a-zA-Z0-9]/_/g ;
                     $yaml_file .= $hrid;
                     $yaml_file .= '.yml';        
                 }
-# passed to Default view
-        $session{last_yaml}=$yaml_file; 
+# filename is stored and passed to Default view
+                $session{last_yaml}=$yaml_file; 
 
                 DumpFile("$yaml_path/$yaml_file", $post) or die $!;
 # re-read the directory list, last edit is now first
@@ -283,14 +282,14 @@ EOF
 <p> Saved $yaml_file... redirecting</p>
 </body></html>
 EOF
-            }
+            } # elsif Publish
      
             else {
                 error($session_id, "$action ain't valid");
             }
         } # session is_logged_in
 
-# well, try to log 'em in, mr POST request not logged in...
+# well, try to log 'em in, mr POST request, but not logged in...
         else {
             if ((my $user=$args->{username}) && (my $pass=$args->{password})){
 
@@ -298,9 +297,10 @@ EOF
                     check_password ( $user, $pass,$session{dirlist} )){ 
 
 # we passed! Go to Admin/User "landing page" with a session passed back.  
+                # TO DO: if we fix to new session id, this isn't needed
                 my $session_id = $session->{_session_id};
                 my $role = $user_data->{role};
-
+# TO DO: put all role checks in the sub, just pass role and caller
 # ( $actions_links, $functions_forms, $session_id, $role, $article, $caller)
                     if ( $role eq 'Admin'){
                         public_reader(['Logout','Articles'],['Add','Edit','Users'], $session_id, $role, $announce_yaml);
@@ -309,7 +309,7 @@ EOF
                         public_reader(['Logout','Articles'],['Add'], $session_id, $role, $announce_yaml); # can edit announce article
 
                     }
-                undef $session; # likely not needed
+                undef $session; # likely not needed - we only re-use the id:FIX
                 } # password_ok, new session and landing pages
                 else {
                    error(undef,"bad login"); 
@@ -326,6 +326,7 @@ EOF
      ################### SUBS ####################
 
 sub check_password {
+    # TO DO: remove hard-coded users.db
     # we get the dir_list from initial view, so s/b up-to-date
     my ($user_name, $pass_given,$dir_list) = @_;
     if ($user_name){
@@ -340,7 +341,7 @@ sub check_password {
 # when the sessions.db wants to be gone, filter on last session id
 # in the users.db
 # TO DO: predictible session id c/b bad. Reset to new one
-
+# not sure what, if anything, we'd want to save from session to session?
         my $session_id = $user_data->{ last_session_id }; 
         my $hash_returned = $user_data->{password};
 
@@ -371,6 +372,7 @@ EOF
                     exit; 
                 } 
             else {
+                # password routine failed
                 print $public_error;
             } 
         } # no hash  in DB 
@@ -384,6 +386,8 @@ EOF
 
 # DB entry matched against calculated hash, so authenticated
                 # TO DO: fix the hardcoded sessions db
+                # AND we should just use the current session, mark logged in
+                # simply returning the session_id for the next page
                 my %session;
                 eval { tie %session, 'Apache::Session::SQLite', $session_id, 
                      { DataSource => "dbi:SQLite:$storage_path/sessions.db" };
@@ -393,7 +397,7 @@ EOF
                 }
 
                 $session{is_logged_in} = 1; 
-                $session{last_yaml}=$announce_yaml;
+                $session{last_yaml}=$announce_yaml; # forward to Default view
                 my $session_id = $session{_session_id}; 
 
                 if (! $dir_list){ 
@@ -408,6 +412,7 @@ EOF
                     ("update users set last_session_id = ? where (id = ?)");
                 $sth->execute($session_id, $user_id); 
 # return a reference to this session and the user data hashes
+                # TO DO: fix to just return the session id, now marked loggedin
                 return ($user_data,\%session);
             } # password matched
             else { 
@@ -419,6 +424,7 @@ EOF
 
 
 sub make_footer {
+    # TO DO: just pass the role and caller to determine actions and functions
     my ( $actions_links, $functions_forms, $session_id, $role, $yamlfile) = @_;
     $role = 'Guest' unless $role;
     $yamlfile = '' unless $yamlfile;
@@ -468,10 +474,10 @@ sub render_post {
     $action="&amp;session_id=$session_id&amp;action=Pick" if
         (($role eq 'Admin') || ($role eq 'User'));
     my $drill_link= "<a href=\"${myurl}?file=${yaml}$action\">Link</a>" ;
-my $taglinks;
-for my $tag (split /\s+/, $post->{tags}){
-$taglinks .= "<em>$tag</em>&nbsp;";
-}
+    my $taglinks;
+    for my $tag (split /\s+/, $post->{tags}){
+        $taglinks .= "<em>$tag</em>&nbsp;";
+    }
     my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = gmtime ($post->{datetime} ); 
                 $mon += 1; $year += 1900; 
 # put a date on it, title, etc., from the form
@@ -481,7 +487,7 @@ $taglinks .= "<em>$tag</em>&nbsp;";
 <h1>$post->{title}</h1>
 <h5>$post->{description}</h5>
 <h4>$post->{author}</h4>
-<h6>$datetime</h6>
+<h6><em>$datetime</em></h6>
 $copy
 $drill_link
 <h6>Tags: $taglinks</h6>
@@ -496,7 +502,7 @@ sub public_reader {
     # I THINK we can eliminate this call to the session here entirely
     # TO DO: ^^^^^^^^^^^^^^^
     my ( $actions_links, $functions_forms, $session_id, $role, $article, $caller) = @_; 
-
+    $article = '' unless ($article);
 # sanitize article for ../../ crap. Should probably disallow some other stuff?
     $article =~ s#^[\./]+##g;
     my %session; 
